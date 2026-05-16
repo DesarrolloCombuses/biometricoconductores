@@ -1,0 +1,27 @@
+{
+  "name": "Combuses - Registro de asistencia",
+  "short_name": "Asistencia",
+  "description": "Control de ingreso y salida de colaboradores Combuses",
+  "start_url": "./asistencia-web.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "lang": "es",
+  "dir": "ltr",
+  "icons": [
+    {
+      "src": "./assets/logo-combuses.webp",
+      "type": "image/webp",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "./assets/logo-combuses.webp",
+      "type": "image/webp",
+      "sizes": "any",
+      "purpose": "maskable"
+    }
+  ]
+}
