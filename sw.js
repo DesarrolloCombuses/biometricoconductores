@@ -1,11 +1,11 @@
-const CACHE_VERSION = "v20260515-007";
+const CACHE_VERSION = "v20260516-001";
 const STATIC_CACHE = `combuses-static-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
   "./",
   "./asistencia-web.html",
-  "./asistencia.css?v=20260515-salida",
-  "./asistencia.js?v=20260515-salida",
+  "./asistencia.css?v=20260516-fix-coerce",
+  "./asistencia.js?v=20260516-fix-coerce",
   "./supabase-config.js",
   "./manifest.webmanifest",
   "./assets/logo-combuses.webp"

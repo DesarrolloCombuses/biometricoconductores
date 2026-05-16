@@ -1929,7 +1929,6 @@ async function submitAttendance(event) {
       buk_enviado_at: new Date().toISOString()
     };
 
-    let insertedAttendance;
     if (sentidoCorregido && state.lastAttendance?.id) {
       const updatePayload = {
         fecha: now.date,
@@ -1951,22 +1950,16 @@ async function submitAttendance(event) {
         buk_error: null,
         buk_enviado_at: new Date().toISOString()
       };
-      const { data: updated, error: updateError } = await supabaseClient
+      const { error: updateError } = await supabaseClient
         .from("asistencias")
         .update(updatePayload)
-        .eq("id", state.lastAttendance.id)
-        .select("id")
-        .single();
+        .eq("id", state.lastAttendance.id);
       if (updateError) throw updateError;
-      insertedAttendance = updated;
     } else {
-      const { data: inserted, error: insertError } = await supabaseClient
+      const { error: insertError } = await supabaseClient
         .from("asistencias")
-        .insert(payload)
-        .select("id")
-        .single();
+        .insert(payload);
       if (insertError) throw insertError;
-      insertedAttendance = inserted;
     }
 
     let sonarData = null;
@@ -2917,20 +2910,21 @@ async function registerManualExit(event) {
         observacion
       })
       .select("id")
-      .single();
+      .maybeSingle();
 
     if (insertError) throw insertError;
 
+    const bukBody = {
+      obra_id: BUK_OBRA_ID,
+      dni_colaborador: colaborador.dni,
+      jornada: fecha,
+      fecha,
+      hora,
+      sentido: "salida"
+    };
+    if (insertedAttendance?.id) bukBody.asistencia_id = insertedAttendance.id;
     const { data: bukData, error: bukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-      body: {
-        asistencia_id: insertedAttendance.id,
-        obra_id: BUK_OBRA_ID,
-        dni_colaborador: colaborador.dni,
-        jornada: fecha,
-        fecha,
-        hora,
-        sentido: "salida"
-      }
+      body: bukBody
     });
 
     if (bukError || !bukData?.ok) {
