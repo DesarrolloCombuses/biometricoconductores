@@ -7,21 +7,21 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Asistencia</title>
-  <meta name="theme-color" content="#0f172a">
-  <meta name="description" content="Control de ingreso y salida de colaboradores Combuses">
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#0a6b3b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Asistencia">
-  <meta name="mobile-web-app-capable" content="yes">
-  <link rel="manifest" href="./manifest.webmanifest">
-  <link rel="icon" href="./assets/logo-combuses.webp" type="image/webp">
-  <link rel="apple-touch-icon" href="./assets/logo-combuses.webp">
+  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./assets/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="./assets/icon-512.png">
+  <link rel="icon" type="image/webp" href="./assets/logo-combuses.webp">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20260516-fix-coerce">
+  <link rel="stylesheet" href="./asistencia.css?v=20260527-migration-from-old">
 </head>
 <body>
   <main class="shell">
@@ -30,7 +30,7 @@
         <div class="brand-block">
           <img class="brand-logo" src="./assets/logo-combuses.webp" alt="Combuses">
           <div>
-            <h1>Combuses</h1>
+            <h1>Combuses <span class="app-pill app-pill-conductores">Conductores</span></h1>
             <p>Control de ingreso y salida</p>
           </div>
         </div>
@@ -59,11 +59,19 @@
         <div>
           <div class="top-brand">
             <img class="top-logo" src="./assets/logo-combuses.webp" alt="Combuses">
-            <h1>Registro de asistencia</h1>
+            <h1>Registro de asistencia <span class="app-pill app-pill-conductores">Conductores</span></h1>
           </div>
           <p id="userLabel"></p>
         </div>
         <div class="top-actions">
+          <button id="installPwaButton" class="install-pwa-button hidden" type="button" title="Instalar como aplicacion">
+            <i data-lucide="download"></i>
+            <span>Instalar app</span>
+          </button>
+          <span id="deviceModeBadge" class="device-mode-badge" data-mode="desktop" title="Modo de visualizacion">
+            <i data-lucide="monitor"></i>
+            <span>Web</span>
+          </span>
           <span id="connectionStatus" class="connection-status offline">Sin conexión</span>
           <button id="logoutButton" class="icon-button" type="button" aria-label="Cerrar sesión" title="Cerrar sesión">
             <i data-lucide="log-out"></i>
@@ -87,6 +95,7 @@
         <button id="adminTabButton" class="tab-button hidden" type="button">
           <i data-lucide="shield-check"></i>
           Administración
+          <span id="adminTabBadge" class="tab-badge hidden" aria-label="Turnos vencidos sin cerrar">0</span>
         </button>
       </nav>
 
@@ -183,7 +192,19 @@
 
           <div id="markControls" class="hidden">
             <div id="nextMarkBox" class="next-mark-box">
-              Próxima marca: <strong id="nextMarkLabel">Entrada</strong>
+              <div class="sentido-selector-label">Tipo de marca</div>
+              <div class="sentido-selector">
+                <button id="sentidoEntradaButton" class="sentido-button" type="button" data-sentido="entrada">
+                  <i data-lucide="log-in"></i>
+                  Entrada
+                </button>
+                <button id="sentidoSalidaButton" class="sentido-button" type="button" data-sentido="salida">
+                  <i data-lucide="log-out"></i>
+                  Salida
+                </button>
+              </div>
+              <div id="sentidoSuggestion" class="sentido-suggestion"></div>
+              <div id="jornadaHint" class="jornada-hint hidden"></div>
             </div>
 
             <label>
@@ -340,6 +361,110 @@
       </section>
 
       <section id="adminPanel" class="admin-panel hidden">
+        <nav class="admin-subtabs" id="adminSubtabs" role="tablist">
+          <button class="admin-subtab active" type="button" data-admin-tab="alerts" role="tab">
+            <i data-lucide="bell-ring"></i>
+            Alertas
+            <span id="adminSubtabAlertsBadge" class="tab-badge hidden">0</span>
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="abiertos" role="tab">
+            <i data-lucide="clock"></i>
+            Turnos abiertos
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="marcas" role="tab">
+            <i data-lucide="list-checks"></i>
+            Marcas
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="rostros" role="tab">
+            <i data-lucide="scan-face"></i>
+            Rostros
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="sonar" role="tab">
+            <i data-lucide="bus-front"></i>
+            Sonar
+          </button>
+        </nav>
+
+        <div class="admin-subtab-content" data-admin-content="alerts">
+        <section class="panel form-panel" id="overdueTurnsPanel">
+          <div class="open-turns-head">
+            <div>
+              <h2>Turnos vencidos (mas de 15h sin cerrar)</h2>
+              <p id="overdueTurnsStatus" class="muted">Sin cargar</p>
+            </div>
+            <div class="open-turns-actions">
+              <button id="overdueTurnsExportButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Excel
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Cargo</th>
+                  <th>Entrada</th>
+                  <th>Tiempo abierto</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="overdueTurnsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="abiertos">
+        <section class="panel form-panel" id="openTurnsPanel">
+          <div class="open-turns-head">
+            <div>
+              <h2>Turnos abiertos</h2>
+              <p id="openTurnsStatus" class="muted">Cargando...</p>
+            </div>
+            <div class="open-turns-actions">
+              <button id="openTurnsExportButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Excel
+              </button>
+              <button id="openTurnsReloadButton" class="secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Actualizar
+              </button>
+            </div>
+          </div>
+          <div class="open-turns-filters">
+            <label class="search-field">
+              Buscar
+              <input id="openTurnsSearchInput" type="search" placeholder="Cédula o nombre">
+            </label>
+            <label class="search-field">
+              Cargo
+              <select id="openTurnsCargoFilter" multiple size="4"></select>
+            </label>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Cargo</th>
+                  <th>Entrada</th>
+                  <th>Tiempo abierto</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="openTurnsBody"></tbody>
+            </table>
+          </div>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="rostros">
         <form id="enrollFaceForm" class="panel form-panel">
           <h2>Registrar rostro de colaborador</h2>
           <div class="field-row">
@@ -372,7 +497,9 @@
           </button>
           <p id="enrollMessage" class="message" role="status"></p>
         </form>
+        </div>
 
+        <div class="admin-subtab-content hidden" data-admin-content="marcas">
         <form id="manualExitForm" class="panel form-panel">
           <h2>Salida manual</h2>
           <div class="field-row">
@@ -399,7 +526,9 @@
           </button>
           <p id="manualMessage" class="message" role="status"></p>
         </form>
+        </div>
 
+        <div class="admin-subtab-content hidden" data-admin-content="sonar">
         <form id="sonarAdminForm" class="panel form-panel">
           <h2>Sonar conductores</h2>
           <div class="field-row">
@@ -415,13 +544,16 @@
           <div id="sonarAdminStatus" class="result-box muted">
             Carga la base de conductores de Sonar para seleccionar uno.
           </div>
+          <div class="sonar-driver-list-wrap">
+            <div class="sonar-driver-selected" id="sonarDriverSelected">
+              <span class="muted">Ningun conductor seleccionado.</span>
+            </div>
+            <ul id="sonarDriverList" class="sonar-driver-list" role="listbox"></ul>
+            <select id="sonarDriverSelect" class="hidden">
+              <option value="">Primero consume conductores</option>
+            </select>
+          </div>
           <div class="field-row">
-            <label>
-              Conductor Sonar
-              <select id="sonarDriverSelect">
-                <option value="">Primero consume conductores</option>
-              </select>
-            </label>
             <label>
               Vehículo Sonar
               <select id="sonarVehicleSelect">
@@ -438,7 +570,9 @@
           </button>
           <p id="sonarAdminMessage" class="message" role="status"></p>
         </form>
+        </div>
 
+        <div class="admin-subtab-content hidden" data-admin-content="marcas">
         <section class="panel database-panel">
           <div class="database-toolbar">
             <div>
@@ -455,8 +589,12 @@
                 <input id="adminDniSearchInput" type="search" placeholder="Cédula">
               </label>
               <label class="search-field">
-                Fecha
-                <input id="adminDateSearchInput" type="date">
+                Desde
+                <input id="adminDateFromInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="adminDateToInput" type="date">
               </label>
               <label class="search-field">
                 Cargo
@@ -478,7 +616,6 @@
                   <th>Entrada</th>
                   <th>Salida</th>
                   <th>Tiempo</th>
-                  <th>Buk</th>
                   <th>Observación</th>
                 </tr>
               </thead>
@@ -497,6 +634,7 @@
             </button>
           </div>
         </section>
+        </div>
       </section>
     </section>
 
@@ -540,16 +678,65 @@
       </div>
     </section>
 
-    <section id="confirmOverlay" class="process-overlay hidden" aria-modal="true" role="dialog" aria-labelledby="confirmTitle">
-      <div class="process-modal confirm-modal">
-        <span id="confirmBadge" class="confirm-badge entrada">ENTRADA</span>
-        <strong id="confirmTitle">¿Confirmas el registro?</strong>
-        <p id="confirmText">Revisa el colaborador y el sentido antes de continuar.</p>
+    <div id="updateBanner" class="update-banner hidden" role="status">
+      <span>Hay una nueva versi&oacute;n disponible.</span>
+      <button id="updateBannerButton" class="primary" type="button">Actualizar</button>
+    </div>
+
+    <aside id="overdueDriversToast" class="overdue-toast hidden" role="alert" aria-live="polite">
+      <div class="overdue-toast-head">
+        <strong>
+          <i data-lucide="alert-triangle"></i>
+          <span id="overdueDriversToastTitle">Conductores con turno &gt; 15 h</span>
+        </strong>
+        <button id="overdueDriversToastClose" class="overdue-toast-close" type="button" aria-label="Cerrar aviso">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <ul id="overdueDriversToastList" class="overdue-toast-list"></ul>
+      <div class="overdue-toast-actions">
+        <button id="overdueDriversToastGo" class="primary wide" type="button">
+          Revisar en el panel
+        </button>
+      </div>
+    </aside>
+
+    <section id="confirmOverlay" class="process-overlay hidden" aria-modal="true" role="dialog">
+      <div class="process-modal alert-modal">
+        <strong id="confirmTitle">Confirmar accion</strong>
+        <p id="confirmText"></p>
         <div class="confirm-actions">
-          <button id="confirmCancelButton" class="secondary" type="button">Cancelar</button>
-          <button id="confirmAcceptButton" class="primary" type="button">Confirmar</button>
+          <button id="confirmCancel" class="secondary" type="button">Cancelar</button>
+          <button id="confirmAccept" class="primary" type="button">Confirmar</button>
         </div>
       </div>
+    </section>
+
+    <section id="pendingExitOverlay" class="process-overlay hidden" aria-modal="true" role="dialog">
+      <form id="pendingExitForm" class="process-modal pending-exit-modal">
+        <strong>Cerrar entrada pendiente</strong>
+        <p id="pendingExitContext" class="pending-exit-context"></p>
+        <label class="pending-field">
+          Fecha real de salida
+          <input id="pendingExitDate" type="date" required>
+        </label>
+        <label class="pending-field">
+          Hora real de salida
+          <input id="pendingExitTime" type="time" required>
+        </label>
+        <label class="pending-field">
+          Motivo del registro manual
+          <textarea id="pendingExitReason" rows="3" required placeholder="Explica por qué la salida no se marcó a tiempo"></textarea>
+        </label>
+        <p class="pending-exit-help">
+          Esta salida se enviará a Buk/Ctrlit con la jornada del día de la entrada y se notificará a administración con el motivo.
+        </p>
+        <p id="pendingExitMessage" class="message" role="status"></p>
+        <div class="pending-exit-actions">
+          <button id="pendingExitCancel" class="secondary" type="button">Cancelar</button>
+          <button id="pendingExitSubmit" class="primary" type="submit">Registrar salida y enviar</button>
+        </div>
+      </form>
     </section>
   </main>
 
@@ -557,7 +744,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20260516-fix-coerce"></script>
+  <script src="./asistencia.js?v=20260527-migration-from-old"></script>
 </body>
 </html>
 

@@ -1,23 +1,22 @@
-const CACHE_VERSION = "v20260516-001";
-const STATIC_CACHE = `combuses-static-${CACHE_VERSION}`;
-
-const PRECACHE_URLS = [
-  "./",
+const APP_VERSION = "20260527-migration-from-old";
+const CACHE_NAME = `combuses-asistencia-${APP_VERSION}`;
+const APP_SHELL = [
   "./asistencia-web.html",
-  "./asistencia.css?v=20260516-fix-coerce",
-  "./asistencia.js?v=20260516-fix-coerce",
+  "./asistencia.css",
+  "./asistencia.js",
   "./supabase-config.js",
-  "./manifest.webmanifest",
-  "./assets/logo-combuses.webp"
+  "./manifest.json",
+  "./assets/logo-combuses.webp",
+  "./assets/icon-192.png",
+  "./assets/icon-512.png",
+  "./assets/icon-maskable-512.png"
 ];
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
-    const cache = await caches.open(STATIC_CACHE);
+    const cache = await caches.open(CACHE_NAME);
     await Promise.all(
-      PRECACHE_URLS.map((url) =>
-        cache.add(new Request(url, { cache: "reload" })).catch(() => null)
-      )
+      APP_SHELL.map((url) => cache.add(new Request(url, { cache: "reload" })).catch(() => null))
     );
     await self.skipWaiting();
   })());
@@ -28,45 +27,71 @@ self.addEventListener("activate", (event) => {
     const keys = await caches.keys();
     await Promise.all(
       keys
-        .filter((k) => k.startsWith("combuses-static-") && k !== STATIC_CACHE)
-        .map((k) => caches.delete(k))
+        .filter((key) =>
+          (key.startsWith("combuses-asistencia-") || key.startsWith("combuses-static-"))
+          && key !== CACHE_NAME)
+        .map((key) => caches.delete(key))
     );
     await self.clients.claim();
   })());
 });
 
 self.addEventListener("message", (event) => {
-  if (event.data && event.data.type === "SKIP_WAITING") {
+  if (event.data?.type === "SKIP_WAITING") {
     self.skipWaiting();
   }
 });
 
 self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  if (req.method !== "GET") return;
+  const request = event.request;
+  if (request.method !== "GET") return;
 
-  const url = new URL(req.url);
+  const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  if (url.pathname.endsWith("/sw.js")) return;
 
-  event.respondWith(networkFirst(req));
+  const esDocumento =
+    request.mode === "navigate" || request.destination === "document";
+
+  if (esDocumento) {
+    event.respondWith(networkFirst(request));
+    return;
+  }
+
+  const esEstatico = ["script", "style", "image", "font", "manifest"].includes(
+    request.destination
+  );
+
+  if (esEstatico) {
+    event.respondWith(staleWhileRevalidate(request));
+  }
 });
 
-async function networkFirst(req) {
-  const cache = await caches.open(STATIC_CACHE);
+async function networkFirst(request) {
   try {
-    const fresh = await fetch(req, { cache: "no-store" });
-    if (fresh && fresh.ok && fresh.type === "basic") {
-      cache.put(req, fresh.clone()).catch(() => null);
+    const fresca = await fetch(request);
+    if (fresca && fresca.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      cache.put(request, fresca.clone());
     }
-    return fresh;
-  } catch (err) {
-    const cached = await cache.match(req, { ignoreSearch: false })
-      || await cache.match(req, { ignoreSearch: true });
+    return fresca;
+  } catch (_) {
+    const cached = await caches.match(request);
     if (cached) return cached;
-    if (req.mode === "navigate") {
-      const fallback = await cache.match("./asistencia-web.html");
-      if (fallback) return fallback;
-    }
-    throw err;
+    return caches.match("./asistencia-web.html");
   }
+}
+
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request);
+  const fetchPromise = fetch(request)
+    .then((respuesta) => {
+      if (respuesta && respuesta.ok) {
+        cache.put(request, respuesta.clone());
+      }
+      return respuesta;
+    })
+    .catch(() => cached);
+  return cached || fetchPromise;
 }

@@ -11,9 +11,48 @@ const FACE_IDENTITY_TIMEOUT_MS = 6500;
 
 const $ = (selector) => document.querySelector(selector);
 
-if (window.matchMedia?.("(pointer: coarse)").matches || navigator.maxTouchPoints > 0) {
-  document.documentElement.classList.add("touch-device");
+function detectDeviceMode() {
+  const ancho = window.innerWidth || document.documentElement.clientWidth || 0;
+  const ua = navigator.userAgent || "";
+  const punteroGrueso = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
+  const tieneTouch = (navigator.maxTouchPoints || 0) > 0 || punteroGrueso;
+  const uaMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const esEstrecho = ancho < 820;
+
+  if (uaMobile || (tieneTouch && esEstrecho)) return "mobile";
+  if (esEstrecho) return "narrow";
+  return "desktop";
 }
+
+function applyDeviceMode() {
+  const modo = detectDeviceMode();
+  const root = document.documentElement;
+  root.dataset.deviceMode = modo;
+  root.classList.toggle("is-mobile", modo === "mobile");
+  root.classList.toggle("is-narrow", modo === "narrow");
+  root.classList.toggle("is-desktop", modo === "desktop");
+  root.classList.toggle("touch-device", modo === "mobile" || modo === "narrow");
+  try { state.deviceMode = modo; } catch (_) { /* state aun no definido en el primer call */ }
+  updateDeviceModeBadge(modo);
+  return modo;
+}
+
+function updateDeviceModeBadge(modo) {
+  const badge = document.getElementById("deviceModeBadge");
+  if (!badge) return;
+  const label = modo === "mobile" ? "Movil" : modo === "narrow" ? "Web compacta" : "Web";
+  const icon = modo === "mobile" ? "smartphone" : "monitor";
+  badge.dataset.mode = modo;
+  badge.title = `Modo de visualizacion: ${label} (${window.innerWidth}px)`;
+  badge.innerHTML = `<i data-lucide="${icon}"></i><span>${label}</span>`;
+  if (window.lucide?.createIcons) {
+    try { window.lucide.createIcons({ icons: window.lucide.icons }); } catch (_) {}
+  }
+}
+
+applyDeviceMode();
+window.addEventListener("resize", () => { applyDeviceMode(); });
+window.addEventListener("orientationchange", () => { applyDeviceMode(); });
 
 const state = {
   user: null,
@@ -33,6 +72,14 @@ const state = {
   vehiclesLoaded: false,
   attendanceSonarDriver: null,
   lastAttendance: null,
+  lastEntrada: null,
+  openEntrada: null,
+  submittingMark: false,
+  overdueToastDismissed: false,
+  overdueToastDismissedIds: [],
+  adminSubtab: "alerts",
+  openTurns: [],
+  selectedSonarDriverId: null,
   cameraStream: null,
   cameraOpenedAt: 0,
   cameraFallbackTimer: null,
@@ -40,6 +87,8 @@ const state = {
   liveFaceOk: false,
   serverClock: null,
   serverClockTimer: null,
+  reportDateTouched: false,
+  reportTimeTouched: false,
   csvRows: [],
   csvLoaded: false,
   dniValidationTimer: null,
@@ -65,6 +114,14 @@ const elements = {
   historyTabButton: $("#historyTabButton"),
   databaseTabButton: $("#databaseTabButton"),
   adminTabButton: $("#adminTabButton"),
+  adminTabBadge: $("#adminTabBadge"),
+  adminSubtabs: $("#adminSubtabs"),
+  adminSubtabAlertsBadge: $("#adminSubtabAlertsBadge"),
+  overdueDriversToast: $("#overdueDriversToast"),
+  overdueDriversToastTitle: $("#overdueDriversToastTitle"),
+  overdueDriversToastList: $("#overdueDriversToastList"),
+  overdueDriversToastClose: $("#overdueDriversToastClose"),
+  overdueDriversToastGo: $("#overdueDriversToastGo"),
   registerPanel: $("#registerPanel"),
   historyPanel: $("#historyPanel"),
   databasePanel: $("#databasePanel"),
@@ -92,7 +149,10 @@ const elements = {
   locationMap: $("#locationMap"),
   locationPermissionHelp: $("#locationPermissionHelp"),
   markControls: $("#markControls"),
-  nextMarkLabel: $("#nextMarkLabel"),
+  sentidoEntradaButton: $("#sentidoEntradaButton"),
+  sentidoSalidaButton: $("#sentidoSalidaButton"),
+  sentidoSuggestion: $("#sentidoSuggestion"),
+  jornadaHint: $("#jornadaHint"),
   stepDni: $("#stepDni"),
   stepPhoto: $("#stepPhoto"),
   stepRegister: $("#stepRegister"),
@@ -120,11 +180,28 @@ const elements = {
   alertText: $("#alertText"),
   alertButton: $("#alertButton"),
   confirmOverlay: $("#confirmOverlay"),
-  confirmBadge: $("#confirmBadge"),
   confirmTitle: $("#confirmTitle"),
   confirmText: $("#confirmText"),
-  confirmAcceptButton: $("#confirmAcceptButton"),
-  confirmCancelButton: $("#confirmCancelButton"),
+  confirmCancel: $("#confirmCancel"),
+  confirmAccept: $("#confirmAccept"),
+  openTurnsStatus: $("#openTurnsStatus"),
+  openTurnsBody: $("#openTurnsBody"),
+  openTurnsReloadButton: $("#openTurnsReloadButton"),
+  openTurnsExportButton: $("#openTurnsExportButton"),
+  openTurnsSearchInput: $("#openTurnsSearchInput"),
+  openTurnsCargoFilter: $("#openTurnsCargoFilter"),
+  overdueTurnsStatus: $("#overdueTurnsStatus"),
+  overdueTurnsBody: $("#overdueTurnsBody"),
+  overdueTurnsExportButton: $("#overdueTurnsExportButton"),
+  pendingExitOverlay: $("#pendingExitOverlay"),
+  pendingExitForm: $("#pendingExitForm"),
+  pendingExitContext: $("#pendingExitContext"),
+  pendingExitDate: $("#pendingExitDate"),
+  pendingExitTime: $("#pendingExitTime"),
+  pendingExitReason: $("#pendingExitReason"),
+  pendingExitMessage: $("#pendingExitMessage"),
+  pendingExitCancel: $("#pendingExitCancel"),
+  pendingExitSubmit: $("#pendingExitSubmit"),
   refreshButton: $("#refreshButton"),
   historyDniInput: $("#historyDniInput"),
   historyStartDateInput: $("#historyStartDateInput"),
@@ -155,13 +232,16 @@ const elements = {
   loadSonarDriversButton: $("#loadSonarDriversButton"),
   sonarAdminStatus: $("#sonarAdminStatus"),
   sonarDriverSelect: $("#sonarDriverSelect"),
+  sonarDriverList: $("#sonarDriverList"),
+  sonarDriverSelected: $("#sonarDriverSelected"),
   sonarVehicleSelect: $("#sonarVehicleSelect"),
   sonarSelectionBox: $("#sonarSelectionBox"),
   assignSonarDriverButton: $("#assignSonarDriverButton"),
   sonarAdminMessage: $("#sonarAdminMessage"),
   adminNameSearchInput: $("#adminNameSearchInput"),
   adminDniSearchInput: $("#adminDniSearchInput"),
-  adminDateSearchInput: $("#adminDateSearchInput"),
+  adminDateFromInput: $("#adminDateFromInput"),
+  adminDateToInput: $("#adminDateToInput"),
   adminCargoFilter: $("#adminCargoFilter"),
   reloadMarksButton: $("#reloadMarksButton"),
   adminMarksStatus: $("#adminMarksStatus"),
@@ -200,124 +280,10 @@ function hideProcess() {
   elements.processOverlay?.classList.add("hidden");
 }
 
-function vibrateDevice(pattern) {
-  try {
-    if ("vibrate" in navigator && pattern) navigator.vibrate(pattern);
-  } catch (e) {}
-}
-
-let audioCtxRef = null;
-function getAudioCtx() {
-  if (audioCtxRef) return audioCtxRef;
-  try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return null;
-    audioCtxRef = new Ctx();
-  } catch (e) {
-    audioCtxRef = null;
-  }
-  return audioCtxRef;
-}
-
-function beepTone({ frequency = 880, duration = 160, type = "sine", volume = 0.18 } = {}) {
-  const ctx = getAudioCtx();
-  if (!ctx) return;
-  if (ctx.state === "suspended") {
-    ctx.resume().catch(() => null);
-  }
-  try {
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = frequency;
-    gain.gain.value = volume;
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration / 1000);
-    osc.stop(ctx.currentTime + duration / 1000);
-  } catch (e) {}
-}
-
-function playFeedback(kind) {
-  switch (kind) {
-    case "error":
-      vibrateDevice([90, 60, 90, 60, 160]);
-      beepTone({ frequency: 220, duration: 200 });
-      setTimeout(() => beepTone({ frequency: 180, duration: 260 }), 200);
-      break;
-    case "warning":
-      vibrateDevice([80, 50, 80]);
-      beepTone({ frequency: 520, duration: 160 });
-      setTimeout(() => beepTone({ frequency: 420, duration: 200 }), 170);
-      break;
-    case "success":
-      vibrateDevice([40]);
-      beepTone({ frequency: 740, duration: 120 });
-      setTimeout(() => beepTone({ frequency: 1040, duration: 180 }), 130);
-      break;
-    case "confirm":
-    default:
-      vibrateDevice([30, 30, 30]);
-      beepTone({ frequency: 880, duration: 140 });
-  }
-}
-
-let alertReopenCamera = false;
-
-function showAlertModal(title, text, kind = "warning", { reopenCamera = false } = {}) {
+function showAlertModal(title, text) {
   elements.alertTitle.textContent = title;
   elements.alertText.textContent = text;
   elements.alertOverlay.classList.remove("hidden");
-  alertReopenCamera = reopenCamera;
-  playFeedback(kind);
-}
-
-function notifyError(message, { title = "Error en el registro", focus } = {}) {
-  setMessage(elements.formMessage, message, "error");
-  showAlertModal(title, message, "error");
-  if (focus && focus.focus) {
-    try { focus.focus(); } catch (e) {}
-    if (focus.scrollIntoView) {
-      try { focus.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {}
-    }
-  }
-}
-
-let confirmResolver = null;
-let confirmTimer = null;
-
-function showConfirmModal({ sentido, title, text, acceptLabel, cancelLabel = "Cancelar", timeoutMs = 60000 }) {
-  const isEntrada = sentido === "entrada";
-  elements.confirmBadge.textContent = isEntrada ? "ENTRADA" : "SALIDA";
-  elements.confirmBadge.classList.remove("entrada", "salida");
-  elements.confirmBadge.classList.add(isEntrada ? "entrada" : "salida");
-  elements.confirmTitle.textContent = title || (isEntrada ? "¿Confirmas la ENTRADA?" : "¿Confirmas la SALIDA?");
-  elements.confirmText.textContent = text || "";
-  elements.confirmAcceptButton.textContent = acceptLabel || (isEntrada ? "Registrar entrada" : "Registrar salida");
-  elements.confirmCancelButton.textContent = cancelLabel;
-  elements.confirmOverlay.classList.remove("hidden");
-  if (confirmResolver) {
-    const prev = confirmResolver;
-    confirmResolver = null;
-    prev(false);
-  }
-  if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null; }
-  if (timeoutMs > 0) {
-    confirmTimer = setTimeout(() => resolveConfirmModal(false), timeoutMs);
-  }
-  playFeedback("confirm");
-  return new Promise((resolve) => {
-    confirmResolver = resolve;
-  });
-}
-
-function resolveConfirmModal(value) {
-  if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null; }
-  elements.confirmOverlay.classList.add("hidden");
-  const r = confirmResolver;
-  confirmResolver = null;
-  if (r) r(value);
 }
 
 function hideAlertModal() {
@@ -373,7 +339,7 @@ function setWorkflowState(stage) {
       elements.submitButton.scrollIntoView({ behavior: "smooth", block: "center" });
       try { elements.submitButton.focus({ preventScroll: true }); } catch (_) {}
     }, 220);
-    if (shouldRequestDriverData() && !state.currentLocation) {
+    if (state.isDriverCandidate && !state.currentLocation) {
       setTimeout(() => { captureCurrentLocation(); }, 350);
     }
   }
@@ -382,7 +348,8 @@ function setWorkflowState(stage) {
   elements.submitButton.disabled = stage !== "register";
   elements.submitButton.classList.toggle("attention", stage === "register");
   elements.markControls.classList.toggle("hidden", stage === "dni");
-  elements.nextMarkLabel.textContent = state.nextSentido;
+  renderSentidoSelector();
+  renderJornadaHint();
 
   if (stage === "dni") {
     setNextActionNotice("");
@@ -420,7 +387,7 @@ async function rollbackAttendanceFailure({ asistenciaId, photoPath, dni, bukData
 
   if (rollbackErrors.length) {
     const modalText = `Buk rechazo la marca. Se intento revertir la asistencia con estos problemas: ${rollbackErrors.join(", ")}. Toca de nuevo Registrar asistencia para reintentar.`;
-    showAlertModal("Reintentar registro", modalText, "warning", { reopenCamera: true });
+    showAlertModal("Reintentar registro", modalText);
   }
 
   elements.dniInput.value = dni || elements.dniInput.value;
@@ -510,27 +477,26 @@ function getTrustedNowParts() {
 
 function renderServerClock() {
   const now = getTrustedNowParts();
-  if (!state.isAdmin || !elements.reportDateInput.value) {
+  if (!state.reportDateTouched && !elements.reportDateInput.value) {
     elements.reportDateInput.value = now.date;
   }
-  if (!state.isAdmin || !elements.reportTimeInput.value) {
+  if (!state.reportTimeTouched && !elements.reportTimeInput.value) {
     elements.reportTimeInput.value = now.time.slice(0, 5);
   }
 }
 
 function configureReportTimeControls() {
-  const editable = state.isAdmin;
-  elements.reportDateInput.disabled = !editable;
-  elements.reportTimeInput.disabled = !editable;
-  elements.reportTimeHint.textContent = editable
-    ? "Administrador: puedes modificar la fecha y hora antes de registrar."
-    : "La fecha y hora vienen del servidor.";
+  elements.reportDateInput.disabled = true;
+  elements.reportTimeInput.disabled = true;
+  elements.reportDateInput.readOnly = true;
+  elements.reportTimeInput.readOnly = true;
+  elements.reportTimeHint.textContent = "La fecha y hora vienen del servidor y no se pueden modificar.";
 }
 
 function getReportParts() {
   const now = getTrustedNowParts();
-  const date = state.isAdmin && elements.reportDateInput.value ? elements.reportDateInput.value : now.date;
-  const timeValue = state.isAdmin && elements.reportTimeInput.value ? elements.reportTimeInput.value : now.time.slice(0, 5);
+  const date = elements.reportDateInput.value || now.date;
+  const timeValue = elements.reportTimeInput.value || now.time.slice(0, 5);
   const time = timeValue.length === 5 ? `${timeValue}:00` : timeValue;
   const [year, month, day] = date.split("-");
   return { year, month, day, date, time };
@@ -627,6 +593,39 @@ async function loadProfile() {
   elements.adminTabButton.classList.toggle("hidden", !state.isAdmin);
   elements.databaseTabButton.classList.toggle("hidden", !state.isAdmin);
   configureReportTimeControls();
+
+  if (state.isAdmin) {
+    loadOpenTurns().catch(() => {});
+  } else {
+    updateOverdueBadge(0);
+  }
+}
+
+function updateOverdueBadge(count) {
+  const label = !count || count <= 0 ? "" : (count > 99 ? "99+" : String(count));
+  [elements.adminTabBadge, elements.adminSubtabAlertsBadge].forEach((badge) => {
+    if (!badge) return;
+    if (!label) {
+      badge.classList.add("hidden");
+      badge.textContent = "0";
+    } else {
+      badge.textContent = label;
+      badge.classList.remove("hidden");
+    }
+  });
+}
+
+function showAdminSubtab(name) {
+  const valid = ["alerts", "abiertos", "marcas", "rostros", "sonar"];
+  const target = valid.includes(name) ? name : "alerts";
+  document.querySelectorAll("[data-admin-tab]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.adminTab === target);
+    btn.setAttribute("aria-selected", btn.dataset.adminTab === target ? "true" : "false");
+  });
+  document.querySelectorAll("[data-admin-content]").forEach((node) => {
+    node.classList.toggle("hidden", node.dataset.adminContent !== target);
+  });
+  state.adminSubtab = target;
 }
 
 function showTab(tabName) {
@@ -651,9 +650,11 @@ function showTab(tabName) {
   }
 
   if (isAdmin) {
+    showAdminSubtab(state.adminSubtab || "alerts");
     syncServerClock().then(setupManualDefaults);
     loadVehicles();
     loadAdminMarks();
+    loadOpenTurns();
   }
 }
 
@@ -661,27 +662,22 @@ function normalizeDni(value) {
   return String(value || "").trim().replace(/\s+/g, "");
 }
 
+function isDriverCargo(cargo) {
+  return /\bconductor\b|operador|motorista/.test(String(cargo || "").toLowerCase());
+}
+
 function isDriverCollaborator(csvCollaborator) {
-  const cargo = String(csvCollaborator?.cargo || "").toLowerCase();
-  return /\bconductor\b|operador|motorista/.test(cargo);
+  return isDriverCargo(csvCollaborator?.cargo);
 }
 
 function requiresBiometric() {
   return state.isDriverCandidate;
 }
 
-function shouldRequestDriverData() {
-  return state.isDriverCandidate && state.nextSentido === "entrada";
-}
-
-function updateDriverFieldsVisibility() {
-  elements.driverFields.classList.toggle("hidden", !shouldRequestDriverData());
-}
-
 function configureDriverFields(csvCollaborator) {
   const isDriver = isDriverCollaborator(csvCollaborator);
   state.isDriverCandidate = isDriver;
-  updateDriverFieldsVisibility();
+  elements.driverFields.classList.toggle("hidden", !isDriver);
 
   if (!isDriver) {
     elements.vehicleInput.value = "";
@@ -927,8 +923,9 @@ async function buscarColaborador() {
 
   state.colaborador = data || null;
   await loadLastAttendance(dni);
-  state.nextSentido = getNextSentidoFromLastAttendance();
-  updateDriverFieldsVisibility();
+  await loadLastEntradaForDni(dni);
+  computeOpenEntrada();
+  state.nextSentido = state.openEntrada ? "salida" : "entrada";
   const faceStatus = state.isDriverCandidate
     ? (data?.rostro_enrolado ? "Conductor con rostro enrolado: se intentara validacion biometrica." : "Conductor sin rostro enrolado: se intentara detectar rostro.")
     : "Foto obligatoria como evidencia. Biometria no requerida para este cargo.";
@@ -944,6 +941,8 @@ async function buscarColaborador() {
     ${state.isDriverCandidate ? `<div>driverId Sonar: ${escapeHtml(state.attendanceSonarDriver?.dr_id || "No encontrado")}</div>` : ""}
     ${state.isDriverCandidate ? `<div>mId Sonar: ${escapeHtml(getSelectedVehicle()?.m_id || "No encontrado")}</div>` : ""}
     <div>${data ? "Validado localmente." : "Validado por CSV. Se creara localmente al registrar."}</div>
+    <div>${renderLastEntradaLabel(state.lastEntrada)}</div>
+    <div>${renderTurnoEstadoLabel()}</div>
     <div>${escapeHtml(faceStatus)}</div>
     <div>Proxima marca permitida: ${escapeHtml(state.nextSentido)}</div>
     ${openInfo ? `<div>${escapeHtml(openInfo)}</div>` : ""}
@@ -952,7 +951,30 @@ async function buscarColaborador() {
   setMessage(elements.formMessage, state.isDriverCandidate
     ? "Cedula activa. Ubica el rostro dentro del recuadro para la validacion biometrica."
     : "Cedula activa. Toma la foto de evidencia para continuar.", "success");
+
+  if (openInfo) {
+    openPendingExitModal();
+  } else if (state.nextSentido === "entrada" && state.lastAttendance?.sentido === "salida") {
+    const last = state.lastAttendance;
+    const today = getTodayParts().date;
+    if (last.fecha && last.fecha < today) {
+      const diffDias = diffDaysBetween(last.fecha, today);
+      if (diffDias >= 2) {
+        showAlertModal(
+          "Verifica tus marcas",
+          `Tu ultima marca fue una salida el ${last.fecha} (${diffDias} dias atras). Si olvidaste registrar una entrada o salida intermedia, avisa al administrador antes de continuar.`
+        );
+      }
+    }
+  }
+
   await startCamera();
+}
+
+function diffDaysBetween(fromDate, toDate) {
+  const a = new Date(`${fromDate}T00:00:00`);
+  const b = new Date(`${toDate}T00:00:00`);
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
 }
 
 function escapeHtml(value) {
@@ -1565,7 +1587,11 @@ async function captureCurrentLocation() {
 
   const point = findNearestOperationalPoint(location);
   state.currentLocation = { ...location, punto_operativo: point?.name || "" };
-  elements.locationStatus.textContent = formatLocationStatus(state.currentLocation, point);
+  const baseLabel = formatLocationStatus(state.currentLocation, point);
+  const esMovil = state.deviceMode === "mobile";
+  elements.locationStatus.textContent = esMovil
+    ? `${baseLabel} (validada en el dispositivo, no se almacena)`
+    : baseLabel;
   elements.locationMap.textContent = "";
   renderLocationMap(location.latitud, location.longitud, location.precision);
   return state.currentLocation;
@@ -1612,110 +1638,11 @@ function formatLocationStatus(location, point) {
   return `${coords} ${precision} Punto mas cercano: ${point.name} a ${distance} m (${inside ? "dentro" : "fuera"} del radio).`;
 }
 
-function bukSaysNoEntryPrev(bukData) {
-  if (!bukData) return false;
-  const collect = [];
-  collect.push(bukData?.error);
-  collect.push(bukData?.respuesta?.error);
-  const intentos = Array.isArray(bukData?.intentos) ? bukData.intentos : [];
-  intentos.forEach((i) => {
-    collect.push(i?.error);
-    collect.push(i?.respuesta?.error);
-  });
-  return collect.some((msg) => {
-    const text = String(msg || "").toLowerCase();
-    return text.includes("no existe una marca de entrada previa")
-      || text.includes("no existe marca de entrada");
-  });
-}
-
-function getPreviousDateString(dateStr) {
-  const d = new Date(`${dateStr}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return null;
-  d.setDate(d.getDate() - 1);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-async function detectOpenEntryFromPreviousDay(dni, todayDate) {
-  const last = await loadLastAttendance(dni);
-  if (!last) return null;
-  if (last.sentido !== "entrada") return null;
-  if (!last.fecha || last.fecha >= todayDate) return null;
-  return last;
-}
-
-async function registerAutoClosureForOpenEntry({ openEntry, colaboradorId, obraId, registradoPor, colaboradorDni }) {
-  const closureDate = openEntry.fecha;
-  const closureTime = "23:59:00";
-
-  let bukData = null;
-  let bukOk = false;
-  let bukErrorText = "";
-  try {
-    const { data, error } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-      body: {
-        obra_id: BUK_OBRA_ID,
-        dni_colaborador: colaboradorDni,
-        jornada: closureDate,
-        fecha: closureDate,
-        hora: closureTime,
-        sentido: "salida"
-      }
-    });
-    bukData = data || null;
-    bukOk = Boolean(data?.ok) && !error;
-    if (!bukOk) bukErrorText = data?.error || error?.message || "";
-  } catch (err) {
-    bukData = { ok: false, error: err?.message || "Error de red al enviar el cierre automatico" };
-    bukErrorText = bukData.error;
-    bukOk = false;
-  }
-
-  const observacion = `Cierre automatico: no se registro salida el ${closureDate}. La salida se genero al ingresar el siguiente dia (${closureTime}).`;
-
-  const payload = {
-    colaborador_id: colaboradorId,
-    obra_id: obraId,
-    fecha: closureDate,
-    hora: closureTime,
-    jornada: closureDate,
-    sentido: "salida",
-    foto_path: null,
-    foto_eliminar_en: null,
-    latitud: null,
-    longitud: null,
-    vehiculo_reporte: null,
-    base_operativa: null,
-    punto_operativo: null,
-    ubicacion_precision_m: null,
-    origen: "cierre_automatico",
-    registrado_por: registradoPor,
-    observacion,
-    enviado_buk: bukOk,
-    buk_status: bukOk ? (bukData?.status ?? null) : "pendiente",
-    buk_respuesta: bukData
-      ? { obra_id_usado: bukData?.obra_id_usado ?? null, intentos: bukData?.intentos ?? [] }
-      : null,
-    buk_error: bukOk ? null : (bukErrorText || "Buk rechazo el cierre automatico"),
-    buk_enviado_at: new Date().toISOString()
-  };
-
-  const { error: insertError } = await supabaseClient
-    .from("asistencias")
-    .insert(payload);
-
-  if (insertError) {
-    throw new Error(`No se pudo registrar el cierre automatico: ${insertError.message}`);
-  }
-
-  return { bukOk, bukErrorText, openEntry, closureDate, closureTime };
-}
-
 async function submitAttendance(event) {
   event.preventDefault();
+  if (state.submittingMark) {
+    return;
+  }
   if (!requireOnline()) return;
   setMessage(elements.formMessage, "");
   clearBukResult();
@@ -1741,187 +1668,217 @@ async function submitAttendance(event) {
     state.colaborador = ensuredCollaborator;
   }
 
-  if (shouldRequestDriverData()) {
+  if (state.isDriverCandidate) {
     const selectedVehicle = getSelectedVehicle();
     if (!selectedVehicle?.m_id) {
+      setMessage(elements.formMessage, "Falta seleccionar el vehiculo. Escribe el interno o placa y elige una opcion de la lista.", "error");
       elements.vehicleInput.classList.add("invalid");
-      notifyError(
-        "Falta seleccionar el vehiculo. Escribe el interno o placa y elige una opcion de la lista.",
-        { title: "Vehiculo no seleccionado", focus: elements.vehicleInput }
-      );
+      elements.vehicleInput.focus();
+      elements.vehicleInput.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (!elements.baseInput.value.trim()) {
+      setMessage(elements.formMessage, "Falta la base operativa del conductor.", "error");
       elements.baseInput.classList.add("invalid");
-      notifyError(
-        "Falta la base operativa del conductor.",
-        { title: "Base operativa requerida", focus: elements.baseInput }
-      );
+      elements.baseInput.focus();
+      elements.baseInput.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
 
     if (!state.attendanceSonarDriver?.dr_id) {
-      notifyError(
-        "No se pudo preparar el driverId de Sonar para este conductor.",
-        { title: "Sonar no disponible" }
-      );
+      setMessage(elements.formMessage, "No se pudo preparar el driverId de Sonar para este conductor.", "error");
       return;
     }
 
     if (!state.currentLocation) {
       const location = await captureCurrentLocation();
       if (!location) {
-        notifyError(
-          "Valida la ubicacion del conductor antes de registrar.",
-          { title: "Ubicacion requerida" }
-        );
+        setMessage(elements.formMessage, "Valida la ubicacion del conductor antes de registrar.", "error");
         return;
       }
     }
   }
 
-  const pendingSentido = state.nextSentido;
-  const reportParts = getReportParts();
-  const colaboradorNombre = state.colaborador?.nombre || state.csvCandidate?.nombre || normalizeDni(elements.dniInput.value);
-  const horaPreview = reportParts.time ? String(reportParts.time).slice(0, 5) : "--:--";
-  const fechaPreview = reportParts.date || "fecha del servidor";
-  const driverExtra = shouldRequestDriverData()
-    ? ` Vehiculo: ${getSelectedVehicleLabel() || "—"} | Base: ${elements.baseInput.value.trim() || "—"}.`
-    : "";
-  const confirmed = await showConfirmModal({
-    sentido: pendingSentido,
-    text: `${colaboradorNombre} - ${fechaPreview} ${horaPreview}. Vas a registrar ${pendingSentido.toUpperCase()}.${driverExtra}`
-  });
-  if (!confirmed) {
-    setMessage(elements.formMessage, "Registro cancelado. Revisa la cedula y el sentido antes de continuar.", "");
-    return;
-  }
-
+  state.submittingMark = true;
   setBusy(elements.submitButton, true);
   elements.submitButton.classList.remove("attention");
   showProcess("Registrando asistencia", "Guardando foto, marca y envio a Buk/Ctrlit...");
 
   try {
     await syncServerClock();
-    let sentido = state.nextSentido;
-    let sentidoCorregido = null;
+    const sentido = state.nextSentido;
     const now = getReportParts();
     if (!now.date || !now.time) {
       throw new Error("Selecciona fecha y hora de reporte.");
     }
     const colaboradorDni = state.colaborador.dni;
 
-    let autoClosureInfo = null;
-    if (sentido === "entrada") {
-      showProcess("Verificando jornada anterior", "Revisando si quedo una entrada sin cerrar...");
-      const openPrev = await detectOpenEntryFromPreviousDay(colaboradorDni, now.date);
-      if (openPrev) {
-        showProcess(
-          "Cerrando jornada anterior",
-          `Detectamos una entrada del ${openPrev.fecha} sin salida. Generando cierre automatico...`
-        );
-        autoClosureInfo = await registerAutoClosureForOpenEntry({
-          openEntry: openPrev,
-          colaboradorId: state.colaborador.id,
-          obraId: state.colaborador.obra_id,
-          registradoPor: state.user.id,
-          colaboradorDni
-        });
-        await loadLastAttendance(colaboradorDni);
-      }
-    }
-
     showProcess("Validando con Buk/Ctrlit", "Verificando que Buk acepte la marca antes de guardar...");
 
-    let { data: bukData, error: bukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-      body: {
-        obra_id: BUK_OBRA_ID,
-        dni_colaborador: colaboradorDni,
-        jornada: now.date,
-        fecha: now.date,
-        hora: now.time,
-        sentido
-      }
-    });
-
-    showBukResult(bukData || bukError);
-
-    if (bukError || !bukData?.ok) {
-      if (sentido === "salida" && bukSaysNoEntryPrev(bukData)) {
-        showProcess(
-          "Corrigiendo sentido",
-          "Buk no tiene una entrada previa. Cambiando esta marca de SALIDA a ENTRADA..."
-        );
-        const retry = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-          body: {
-            obra_id: BUK_OBRA_ID,
-            dni_colaborador: colaboradorDni,
-            jornada: now.date,
-            fecha: now.date,
-            hora: now.time,
-            sentido: "entrada"
-          }
-        });
-        bukData = retry.data;
-        bukError = retry.error;
-        showBukResult(bukData || bukError);
-
-        if (bukError || !bukData?.ok) {
-          const retryErrText = bukData?.error || bukError?.message || "Buk rechazo la marca incluso al cambiarla a entrada.";
-          setNextActionNotice("Buk rechazo la marca incluso al corregir el sentido. Revisa los datos.");
-          throw new Error(`Buk rechazo la marca (entrada corregida): ${retryErrText}`);
+    let entradaParaCierre = null;
+    let jornadaBuk;
+    if (sentido === "salida") {
+      if (state.openEntrada) {
+        const openFecha = state.openEntrada.fecha;
+        const diaAnterior = addDays(now.date, -1);
+        if (openFecha === now.date || openFecha === diaAnterior) {
+          entradaParaCierre = state.openEntrada;
+          jornadaBuk = state.openEntrada.jornada || state.openEntrada.fecha;
+          console.log("[BUK] cerrando turno abierto", { entradaParaCierre, jornadaBuk });
+        } else {
+          throw new Error(`La entrada abierta del ${openFecha} es mas vieja que el dia anterior; Buk no aceptara esta salida. Cierra esa entrada primero.`);
         }
-
-        sentidoCorregido = { original: "salida", corregido: "entrada" };
-        sentido = "entrada";
       } else {
-        const bukErrorText = bukData?.error || bukError?.message || "Buk/Ctrlit rechazo la marca.";
-        setNextActionNotice("Buk rechazo la marca. Corrige los datos o toca de nuevo Registrar asistencia para reintentar.");
-        throw new Error(`Buk rechazo la marca: ${bukErrorText}`);
+        throw new Error("No hay turno abierto: no se puede registrar una salida sin una entrada previa.");
       }
+    } else {
+      if (state.openEntrada) {
+        throw new Error(`El colaborador ya tiene una entrada abierta del ${state.openEntrada.fecha} ${String(state.openEntrada.hora).slice(0,5)}. Registra primero la salida.`);
+      }
+      jornadaBuk = now.date;
     }
 
-    showProcess("Registrando asistencia", "Buk acepto. Guardando foto y marca...");
-    const photoPath = `asistencias/${now.year}/${now.month}/${now.day}/${colaboradorDni}-${sentido}-${Date.now()}.webp`;
+    showProcess("Validando con Buk/Ctrlit", "Consultando obra real del colaborador en Buk...");
+    const { obraId: obraIdReal, lookup: colaboradorLookup } = await lookupObraIdDeColaborador(colaboradorDni);
+    console.log("[BUK] lookup colaborador", { obraIdReal, colaboradorLookup });
+    const obraIdAUsar = obraIdReal || BUK_OBRA_ID;
 
-    const { error: uploadError } = await supabaseClient.storage
-      .from(config.FOTO_BUCKET)
-      .upload(photoPath, state.compressedFile, {
-        contentType: "image/webp",
-        upsert: false
+    const trazaBuk = [{ paso: "lookup_colaborador", lookup: colaboradorLookup, obra_id_resuelto: obraIdAUsar }];
+    const payloadSalida = {
+      obra_id: obraIdAUsar,
+      dni_colaborador: colaboradorDni,
+      jornada: jornadaBuk,
+      fecha: now.date,
+      hora: now.time,
+      sentido
+    };
+
+    console.log("[BUK] enviando salida (intento 1)", payloadSalida);
+    let { data: bukData, error: bukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
+      body: payloadSalida
+    });
+    console.log("[BUK] respuesta salida (intento 1)", { data: bukData, error: bukError });
+    trazaBuk.push({ paso: "salida_intento_1", payload: payloadSalida, respuesta: bukData ?? null, transportError: bukError?.message ?? null });
+
+    const debeReintentar =
+      (bukError || !bukData?.ok) &&
+      sentido === "salida" &&
+      bukRespuestaMencionaEntradaPrevia(bukData) &&
+      entradaParaCierre;
+
+    console.log("[BUK] retry? ", {
+      debeReintentar,
+      bukOk: bukData?.ok,
+      sentido,
+      mencionaEntradaPrevia: bukRespuestaMencionaEntradaPrevia(bukData),
+      entradaParaCierre
+    });
+
+    if (debeReintentar) {
+      const entrada = entradaParaCierre;
+      const horaEntrada = String(entrada.hora || "").slice(0, 8);
+      const jornadaEntrada = entrada.jornada || entrada.fecha;
+      showProcess(
+        "Reenviando entrada a Buk",
+        `Buk no tiene la entrada del ${entrada.fecha} ${horaEntrada.slice(0, 5)} (jornada ${jornadaEntrada}). Reenviandola antes de la salida...`
+      );
+
+      const payloadEntrada = {
+        asistencia_id: entrada.id,
+        obra_id: obraIdAUsar,
+        dni_colaborador: colaboradorDni,
+        jornada: jornadaEntrada,
+        fecha: entrada.fecha,
+        hora: horaEntrada,
+        sentido: "entrada"
+      };
+      console.log("[BUK] reenviando entrada", payloadEntrada);
+      const { data: entradaBuk, error: entradaBukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
+        body: payloadEntrada
       });
+      console.log("[BUK] respuesta entrada", { data: entradaBuk, error: entradaBukError });
+      trazaBuk.push({ paso: "reenvio_entrada", payload: payloadEntrada, respuesta: entradaBuk ?? null, transportError: entradaBukError?.message ?? null });
 
-    if (uploadError) throw uploadError;
+      if (entradaBukError || !entradaBuk?.ok) {
+        const detalle = entradaBuk?.error || entradaBukError?.message || "Buk no acepto la entrada.";
+        showBukResult({ trazaBuk });
+        setNextActionNotice(`No se pudo reenviar la entrada a Buk: ${detalle}`);
+        throw new Error(`Buk rechazo la entrada al reintentar: ${detalle}`);
+      }
+
+      showProcess("Reintentando salida en Buk", "Entrada aceptada. Enviando la salida nuevamente...");
+
+      console.log("[BUK] enviando salida (intento 2 tras entrada OK)", payloadSalida);
+      const reintento = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
+        body: payloadSalida
+      });
+      console.log("[BUK] respuesta salida (intento 2)", reintento);
+      trazaBuk.push({ paso: "salida_intento_2", payload: payloadSalida, respuesta: reintento.data ?? null, transportError: reintento.error?.message ?? null });
+      bukData = reintento.data;
+      bukError = reintento.error;
+    }
+
+    showBukResult({ resultado_final: bukData || bukError, trazaBuk });
+
+    if (bukError || !bukData?.ok) {
+      const bukErrorText = bukData?.error || bukError?.message || "Buk/Ctrlit rechazo la marca.";
+      setNextActionNotice("Buk rechazo la marca. Corrige los datos o toca de nuevo Registrar asistencia para reintentar.");
+      throw new Error(`Buk rechazo la marca: ${bukErrorText}`);
+    }
+
+    const esMovil = state.deviceMode === "mobile";
+    let photoPath = null;
+    let fotoEliminarEn = null;
+
+    if (esMovil) {
+      showProcess("Registrando asistencia", "Buk acepto. Guardando marca (sin foto, modo movil para ahorrar datos)...");
+    } else {
+      showProcess("Registrando asistencia", "Buk acepto. Guardando foto y marca...");
+      photoPath = `asistencias/${now.year}/${now.month}/${now.day}/${colaboradorDni}-${sentido}-${Date.now()}.webp`;
+      fotoEliminarEn = addDays(now.date, 15);
+
+      const { error: uploadError } = await supabaseClient.storage
+        .from(config.FOTO_BUCKET)
+        .upload(photoPath, state.compressedFile, {
+          contentType: "image/webp",
+          upsert: false
+        });
+
+      if (uploadError) throw uploadError;
+    }
 
     const location = state.currentLocation || await getLocation();
     const userObservation = elements.observacionInput.value.trim();
     const faceObservation = state.faceWarning ? `Validacion facial con advertencia: ${state.faceWarning}` : "";
+    const mobileObservation = esMovil ? "Marca desde movil (foto y geolocalizacion validadas localmente, no almacenadas)" : "";
     const selectedVehicle = getSelectedVehicle();
     const selectedVehicleLabel = getSelectedVehicleLabel();
-    const driverObservation = shouldRequestDriverData()
-      ? `Conductor: vehiculo ${selectedVehicleLabel}; base ${elements.baseInput.value.trim()}; ubicacion ${elements.locationStatus.textContent}`
+    const driverObservation = state.isDriverCandidate
+      ? (esMovil
+        ? `Conductor: vehiculo ${selectedVehicleLabel}; base ${elements.baseInput.value.trim()}; ubicacion validada en sitio (no guardada)`
+        : `Conductor: vehiculo ${selectedVehicleLabel}; base ${elements.baseInput.value.trim()}; ubicacion ${elements.locationStatus.textContent}`)
       : "";
-    const sentidoCorregidoObs = sentidoCorregido
-      ? `Sentido corregido automaticamente: el operador intento ${sentidoCorregido.original.toUpperCase()} pero Buk no tenia entrada previa, se registro como ${sentidoCorregido.corregido.toUpperCase()}.`
-      : "";
+    const origen = state.isAdmin
+      ? "admin_form"
+      : (esMovil ? "movil_sin_foto" : "web");
     const payload = {
       colaborador_id: state.colaborador.id,
       obra_id: state.colaborador.obra_id,
       fecha: now.date,
       hora: now.time,
-      jornada: now.date,
+      jornada: jornadaBuk,
       sentido,
       foto_path: photoPath,
-      foto_eliminar_en: addDays(now.date, 15),
-      latitud: location.latitud || null,
-      longitud: location.longitud || null,
-      vehiculo_reporte: shouldRequestDriverData() ? selectedVehicleLabel : null,
-      base_operativa: shouldRequestDriverData() ? elements.baseInput.value.trim() : null,
-      punto_operativo: shouldRequestDriverData() ? location.punto_operativo || null : null,
-      ubicacion_precision_m: location.precision || null,
-      origen: state.isAdmin ? "admin_form" : "web",
+      foto_eliminar_en: fotoEliminarEn,
+      latitud: esMovil ? null : (location.latitud || null),
+      longitud: esMovil ? null : (location.longitud || null),
+      vehiculo_reporte: state.isDriverCandidate ? selectedVehicleLabel : null,
+      base_operativa: state.isDriverCandidate && !esMovil ? elements.baseInput.value.trim() : null,
+      punto_operativo: state.isDriverCandidate && !esMovil ? (location.punto_operativo || null) : null,
+      ubicacion_precision_m: esMovil ? null : (location.precision || null),
+      origen,
       registrado_por: state.user.id,
-      observacion: [userObservation, faceObservation, driverObservation, sentidoCorregidoObs].filter(Boolean).join(" | ") || null,
+      observacion: [userObservation, faceObservation, driverObservation, mobileObservation].filter(Boolean).join(" | ") || null,
       enviado_buk: true,
       buk_status: bukData.status ?? null,
       buk_respuesta: { obra_id_usado: bukData.obra_id_usado ?? null, intentos: bukData.intentos ?? [] },
@@ -1929,41 +1886,23 @@ async function submitAttendance(event) {
       buk_enviado_at: new Date().toISOString()
     };
 
-    if (sentidoCorregido && state.lastAttendance?.id) {
-      const updatePayload = {
-        fecha: now.date,
-        hora: now.time,
-        jornada: now.date,
-        sentido,
-        foto_path: photoPath,
-        foto_eliminar_en: addDays(now.date, 15),
-        latitud: location.latitud || null,
-        longitud: location.longitud || null,
-        vehiculo_reporte: shouldRequestDriverData() ? selectedVehicleLabel : null,
-        base_operativa: shouldRequestDriverData() ? elements.baseInput.value.trim() : null,
-        punto_operativo: shouldRequestDriverData() ? location.punto_operativo || null : null,
-        ubicacion_precision_m: location.precision || null,
-        observacion: payload.observacion,
-        enviado_buk: true,
-        buk_status: bukData.status ?? null,
-        buk_respuesta: { obra_id_usado: bukData.obra_id_usado ?? null, intentos: bukData.intentos ?? [] },
-        buk_error: null,
-        buk_enviado_at: new Date().toISOString()
-      };
-      const { error: updateError } = await supabaseClient
-        .from("asistencias")
-        .update(updatePayload)
-        .eq("id", state.lastAttendance.id);
-      if (updateError) throw updateError;
-    } else {
-      const { error: insertError } = await supabaseClient
-        .from("asistencias")
-        .insert(payload);
-      if (insertError) throw insertError;
+    const { data: insertedAttendance, error: insertError } = await supabaseClient
+      .from("asistencias")
+      .insert(payload)
+      .select("id")
+      .single();
+
+    if (insertError) {
+      if (insertError.code === "23505") {
+        throw new Error(
+          "Ya existe una marca identica para este colaborador en la misma hora. No se duplico."
+        );
+      }
+      throw insertError;
     }
 
     let sonarData = null;
-    if (shouldRequestDriverData() && selectedVehicle?.m_id) {
+    if (state.isDriverCandidate && selectedVehicle?.m_id) {
       showProcess("Asignando conductor", "Enviando asignacion del conductor al vehiculo en Sonar...");
       const sonarDriver = state.attendanceSonarDriver || await findSonarDriverByDni(colaboradorDni);
       if (!sonarDriver?.dr_id) {
@@ -1997,43 +1936,32 @@ async function submitAttendance(event) {
       }
     }
 
-    if (shouldRequestDriverData() && sonarData && !sonarData?.ok) {
+    if (state.isDriverCandidate && sonarData && !sonarData?.ok) {
       const sonarDebug = [
         sonarData?.error || "error sin detalle",
         sonarData?.conductor?.dr_id ? `dr_id ${sonarData.conductor.dr_id}` : "",
         sonarData?.vehiculo?.m_id ? `mId ${sonarData.vehiculo.m_id}` : ""
       ].filter(Boolean).join(" | ");
-      const sonarMsg = `Asistencia guardada, pero Sonar no asigno el conductor: ${sonarDebug}`;
-      setMessage(elements.formMessage, sonarMsg, "error");
-      showAlertModal("Error en Sonar", sonarMsg, "error");
+      setMessage(elements.formMessage, `Asistencia guardada, pero Sonar no asigno el conductor: ${sonarDebug}`, "error");
     } else {
       setMessage(elements.formMessage, "Asistencia registrada y enviada a Buk/Ctrlit.", "success");
-      playFeedback("success");
+      if (sentido === "salida" && jornadaBuk !== now.date) {
+        showAlertModal(
+          "Turno nocturno cerrado",
+          `Se cerro la jornada ${jornadaBuk}. Buk recibio la salida con la fecha real ${now.date} ${now.time.slice(0, 5)}.`
+        );
+      }
     }
 
     resetAttendanceForm(true);
     elements.dniInput.value = colaboradorDni;
     await loadLastAttendance(colaboradorDni);
     state.nextSentido = getNextSentidoFromLastAttendance();
-    updateDriverFieldsVisibility();
-
-    if (autoClosureInfo) {
-      const bukNote = autoClosureInfo.bukOk
-        ? "La salida automatica tambien fue enviada a Buk/Ctrlit."
-        : `Atencion: Buk/Ctrlit no acepto el cierre automatico (${autoClosureInfo.bukErrorText || "sin detalle"}). El admin debe revisarla.`;
-      const alertText = `No registraste salida del ${autoClosureInfo.openEntry.fecha} `
-        + `(ultima entrada ${String(autoClosureInfo.openEntry.hora).slice(0, 5)}). `
-        + `Se genero una salida automatica a las ${autoClosureInfo.closureTime.slice(0, 5)} para mantener el orden entrada/salida. ${bukNote}`;
-      showAlertModal("Cierre automatico aplicado", alertText, "warning");
-    }
-
   } catch (error) {
-    hideProcess();
-    const msg = error.message || "No se pudo registrar la asistencia.";
-    setMessage(elements.formMessage, msg, "error");
-    showAlertModal("Error en el registro", msg, "error");
+    setMessage(elements.formMessage, error.message || "No se pudo registrar la asistencia.", "error");
     elements.submitButton.disabled = !state.faceValidated;
   } finally {
+    state.submittingMark = false;
     hideProcess();
     if (state.faceValidated) {
       elements.submitButton.disabled = false;
@@ -2089,6 +2017,10 @@ function resetAttendanceForm(preserveBukResult = false) {
   state.csvCandidate = null;
   state.compressedFile = null;
   state.faceValidated = false;
+  state.reportDateTouched = false;
+  state.reportTimeTouched = false;
+  state.lastEntrada = null;
+  state.openEntrada = null;
   elements.attendanceForm.reset();
   elements.collaboratorBox.className = "result-box muted";
   elements.collaboratorBox.textContent = "Digita una cedula para validar si esta activa.";
@@ -2202,7 +2134,7 @@ async function loadLastAttendance(dni) {
 
   const { data, error } = await supabaseClient
     .from("asistencias")
-    .select("id,fecha,hora,sentido,origen,colaboradores!inner(dni,nombre)")
+    .select("id,fecha,hora,jornada,sentido,origen,enviado_buk,buk_status,colaboradores!inner(dni,nombre)")
     .eq("colaboradores.dni", cleanDni)
     .order("fecha", { ascending: false })
     .order("hora", { ascending: false })
@@ -2264,6 +2196,957 @@ function getOpenAttendanceInfo() {
   const today = getTodayParts().date;
   if (last.fecha === today) return "";
   return `Entrada abierta desde ${last.fecha} ${String(last.hora).slice(0, 5)}. Debe registrar salida.`;
+}
+
+function renderSentidoSelector() {
+  if (!elements.sentidoEntradaButton || !elements.sentidoSalidaButton) return;
+  elements.sentidoEntradaButton.classList.toggle("active", state.nextSentido === "entrada");
+  elements.sentidoSalidaButton.classList.toggle("active", state.nextSentido === "salida");
+
+  const suggested = getNextSentidoFromLastAttendance();
+  if (!elements.sentidoSuggestion) return;
+  if (!state.colaborador && !state.csvCandidate) {
+    elements.sentidoSuggestion.textContent = "";
+    return;
+  }
+  if (state.nextSentido === suggested) {
+    elements.sentidoSuggestion.textContent = `Sugerido por la ultima marca: ${suggested}.`;
+  } else {
+    elements.sentidoSuggestion.textContent = `Estas registrando ${state.nextSentido} (sugerido era ${suggested}).`;
+  }
+}
+
+function setSentido(sentido) {
+  if (sentido !== "entrada" && sentido !== "salida") return;
+  state.nextSentido = sentido;
+  renderSentidoSelector();
+  renderJornadaHint();
+}
+
+function renderJornadaHint() {
+  if (!elements.jornadaHint) return;
+  if (state.nextSentido !== "salida" || !state.lastAttendance || state.lastAttendance.sentido !== "entrada") {
+    elements.jornadaHint.classList.add("hidden");
+    elements.jornadaHint.textContent = "";
+    return;
+  }
+  const today = getTodayParts().date;
+  const entradaFecha = state.lastAttendance.fecha;
+  if (!entradaFecha || entradaFecha >= today) {
+    elements.jornadaHint.classList.add("hidden");
+    elements.jornadaHint.textContent = "";
+    return;
+  }
+  const horaEntrada = String(state.lastAttendance.hora || "").slice(0, 5);
+  elements.jornadaHint.textContent = `Cerrando turno nocturno: jornada ${entradaFecha} (entrada ${horaEntrada}).`;
+  elements.jornadaHint.classList.remove("hidden");
+}
+
+function openPendingExitModal() {
+  const last = state.lastAttendance;
+  if (!last || last.sentido !== "entrada") return;
+  const colaborador = state.csvCandidate || state.colaborador;
+  if (!colaborador) return;
+
+  const horaEntrada = String(last.hora || "").slice(0, 5);
+  elements.pendingExitContext.textContent =
+    `Entrada registrada el ${last.fecha} a las ${horaEntrada}. Indica la fecha y hora reales en que el colaborador termino la jornada.`;
+  elements.pendingExitDate.value = "";
+  elements.pendingExitDate.min = last.fecha;
+  elements.pendingExitTime.value = "";
+  elements.pendingExitReason.value = "";
+  setMessage(elements.pendingExitMessage, "");
+  elements.pendingExitOverlay.classList.remove("hidden");
+  setTimeout(() => { try { elements.pendingExitDate.focus(); } catch (_) {} }, 50);
+}
+
+function closePendingExitModal() {
+  elements.pendingExitOverlay.classList.add("hidden");
+  setMessage(elements.pendingExitMessage, "");
+}
+
+async function submitPendingExitFromModal(event) {
+  event.preventDefault();
+  if (!requireOnline(elements.pendingExitMessage)) return;
+
+  const last = state.lastAttendance;
+  const colaboradorCsv = state.csvCandidate;
+  if (!last || last.sentido !== "entrada" || !colaboradorCsv) {
+    setMessage(elements.pendingExitMessage, "No se encontro la entrada pendiente. Vuelve a validar la cedula.", "error");
+    return;
+  }
+
+  const fecha = elements.pendingExitDate.value;
+  const hora = elements.pendingExitTime.value;
+  const motivo = elements.pendingExitReason.value.trim();
+  if (!fecha || !hora || !motivo) {
+    setMessage(elements.pendingExitMessage, "Completa fecha, hora y motivo.", "error");
+    return;
+  }
+
+  const horaConSegundos = hora.length === 5 ? `${hora}:00` : hora;
+  const entradaTs = new Date(`${last.fecha}T${String(last.hora).slice(0, 8)}`);
+  const salidaTs = new Date(`${fecha}T${horaConSegundos}`);
+  if (Number.isNaN(salidaTs.getTime()) || salidaTs <= entradaTs) {
+    setMessage(elements.pendingExitMessage, "La fecha y hora de salida deben ser posteriores a la entrada.", "error");
+    return;
+  }
+
+  setBusy(elements.pendingExitSubmit, true);
+  setMessage(elements.pendingExitMessage, "Registrando salida pendiente...");
+
+  try {
+    const colaborador = await ensureExistingCollaborator(colaboradorCsv);
+    if (!colaborador) {
+      setMessage(elements.pendingExitMessage, "No se pudo localizar el colaborador en la base.", "error");
+      return;
+    }
+
+    const jornadaBuk = computeJornadaForMark("salida", fecha, last.fecha);
+    const observacion = `Salida manual (entrada pendiente del ${last.fecha} ${String(last.hora).slice(0, 5)}). Motivo: ${motivo}`;
+
+    const { data: insertedAttendance, error: insertError } = await supabaseClient
+      .from("asistencias")
+      .insert({
+        colaborador_id: colaborador.id,
+        obra_id: colaborador.obra_id,
+        fecha,
+        hora: horaConSegundos,
+        jornada: jornadaBuk,
+        sentido: "salida",
+        origen: "manual_pendiente",
+        registrado_por: state.user.id,
+        observacion
+      })
+      .select("id")
+      .single();
+
+    if (insertError) throw insertError;
+
+    setMessage(elements.pendingExitMessage, "Consultando obra real del colaborador en Buk...");
+    const { obraId: obraIdReal } = await lookupObraIdDeColaborador(colaborador.dni);
+    const obraIdAUsar = obraIdReal || BUK_OBRA_ID;
+
+    let { data: bukData, error: bukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
+      body: {
+        asistencia_id: insertedAttendance.id,
+        obra_id: obraIdAUsar,
+        dni_colaborador: colaborador.dni,
+        jornada: jornadaBuk,
+        fecha,
+        hora: horaConSegundos,
+        sentido: "salida"
+      }
+    });
+
+    if ((bukError || !bukData?.ok) && bukRespuestaMencionaEntradaPrevia(bukData)) {
+      const horaEntrada = String(last.hora || "").slice(0, 8);
+      const jornadaEntrada = last.jornada || last.fecha;
+      setMessage(elements.pendingExitMessage, `Reenviando entrada del ${last.fecha} ${horaEntrada.slice(0, 5)} (jornada ${jornadaEntrada}) a Buk...`);
+
+      const { data: entradaBuk, error: entradaBukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
+        body: {
+          asistencia_id: last.id,
+          obra_id: obraIdAUsar,
+          dni_colaborador: colaborador.dni,
+          jornada: jornadaEntrada,
+          fecha: last.fecha,
+          hora: horaEntrada,
+          sentido: "entrada"
+        }
+      });
+
+      if (!entradaBukError && entradaBuk?.ok) {
+        setMessage(elements.pendingExitMessage, "Entrada reenviada. Reintentando la salida...");
+        const reintento = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
+          body: {
+            asistencia_id: insertedAttendance.id,
+            obra_id: obraIdAUsar,
+            dni_colaborador: colaborador.dni,
+            jornada: jornadaBuk,
+            fecha,
+            hora: horaConSegundos,
+            sentido: "salida"
+          }
+        });
+        bukData = reintento.data;
+        bukError = reintento.error;
+      } else {
+        setMessage(
+          elements.pendingExitMessage,
+          `Buk no acepto la entrada al reenviarla: ${entradaBuk?.error || entradaBukError?.message || "sin detalle"}`,
+          "error"
+        );
+      }
+    }
+
+    const bukOk = !bukError && bukData?.ok;
+    await notifyManualExitWebhook({
+      colaborador,
+      colaboradorCsv,
+      entrada: last,
+      salida: { fecha, hora: horaConSegundos, jornada: jornadaBuk },
+      motivo,
+      bukOk,
+      bukResultado: bukData ?? { error: bukError?.message || "sin respuesta" },
+      asistenciaId: insertedAttendance.id
+    });
+
+    if (!bukOk) {
+      setMessage(elements.pendingExitMessage, "Salida guardada localmente, pero Buk/Ctrlit no acepto. Administracion fue notificada.", "error");
+    } else {
+      setMessage(elements.pendingExitMessage, "Salida registrada y enviada a Buk/Ctrlit.", "success");
+    }
+
+    resetAttendanceForm(true);
+
+    setTimeout(() => {
+      closePendingExitModal();
+      showAlertModal(
+        bukOk ? "Salida pendiente registrada" : "Salida registrada con observacion",
+        bukOk
+          ? `Se cerro la jornada ${jornadaBuk} con la salida ${fecha} ${hora}. Buk/Ctrlit recibio la marca y se notifico a administracion.`
+          : `Se guardo la salida ${fecha} ${hora} (jornada ${jornadaBuk}), pero Buk/Ctrlit no acepto. Administracion fue notificada para revisar.`
+      );
+    }, 600);
+  } catch (error) {
+    setMessage(elements.pendingExitMessage, error.message || "No se pudo registrar la salida pendiente.", "error");
+  } finally {
+    setBusy(elements.pendingExitSubmit, false);
+  }
+}
+
+async function notifyManualAdminExitWebhook(payload) {
+  const url = config.MANUAL_ADMIN_EXIT_WEBHOOK_URL;
+  if (!url) return;
+
+  const explicacion =
+    "Un administrador registro una salida manual desde el panel de administracion para cerrar el turno de un colaborador. " +
+    "La salida se envio a Buk/Ctrlit usando la fecha real ingresada y la jornada del dia de la entrada.";
+
+  const ahora = new Date();
+  const horaAccion = ahora.toLocaleString("es-CO", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+
+  let horasTurnoAbierto = null;
+  try {
+    const tsEntrada = new Date(`${payload.entrada.fecha}T${String(payload.entrada.hora || "00:00:00").slice(0, 8)}`);
+    const tsSalida = new Date(`${payload.salida.fecha}T${String(payload.salida.hora || "00:00:00").slice(0, 8)}`);
+    const diffMs = tsSalida.getTime() - tsEntrada.getTime();
+    if (Number.isFinite(diffMs) && diffMs > 0) {
+      const totalMin = Math.round(diffMs / 60000);
+      const dias = Math.floor(totalMin / 1440);
+      const horas = Math.floor((totalMin % 1440) / 60);
+      const minutos = totalMin % 60;
+      horasTurnoAbierto = dias >= 1
+        ? `${dias}d ${horas}h ${minutos}m`
+        : `${horas}h ${minutos}m`;
+    }
+  } catch (_) { /* ignorar */ }
+
+  const nombre = payload.colaboradorCsv?.nombre || payload.colaborador.nombre || null;
+  const dni = payload.colaborador.dni;
+  const novedad = `[ADMIN] Cierre manual del turno de ${nombre || "(sin nombre)"} (cedula ${dni}) | Turno abierto: ${horasTurnoAbierto || "n/d"} | Motivo: ${payload.motivo}`;
+
+  const body = {
+    tipo: "salida_manual_admin",
+    explicacion,
+    novedad,
+    hora_accion: horaAccion,
+    enviado_en: ahora.toISOString(),
+    registrado_por: {
+      user_id: state.user?.id ?? null,
+      email: state.user?.email ?? null
+    },
+    colaborador: {
+      id: payload.colaborador.id,
+      dni,
+      nombre,
+      cargo: payload.colaboradorCsv?.cargo || null,
+      empresa: payload.colaboradorCsv?.empresa || payload.colaborador.empresa || null,
+      obra_id: payload.colaborador.obra_id || null
+    },
+    entrada_pendiente: {
+      fecha: payload.entrada.fecha,
+      hora: String(payload.entrada.hora || "").slice(0, 8)
+    },
+    salida_registrada: {
+      asistencia_id: payload.asistenciaId,
+      fecha: payload.salida.fecha,
+      hora: payload.salida.hora,
+      jornada_buk: payload.salida.jornada
+    },
+    horas_turno_abierto: horasTurnoAbierto,
+    motivo: payload.motivo,
+    buk: {
+      ok: payload.bukOk,
+      resultado: payload.bukResultado
+    }
+  };
+
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      mode: "no-cors"
+    });
+  } catch (error) {
+    console.warn("No se pudo notificar webhook de salida manual del admin", error);
+  }
+}
+
+async function notifyManualExitWebhook(payload) {
+  const url = config.MANUAL_EXIT_WEBHOOK_URL;
+  if (!url) return;
+
+  const explicacion =
+    "Se registro una salida manual porque el colaborador tenia una entrada abierta sin cerrar. " +
+    "La salida se envio a Buk/Ctrlit usando la fecha real ingresada por el usuario y la jornada del dia de la entrada, " +
+    "de modo que el turno nocturno quede cerrado en el sistema de nomina. Este aviso permite a administracion auditar el caso.";
+
+  const ahora = new Date();
+  const horaAccion = ahora.toLocaleString("es-CO", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+
+  let horasTurnoAbierto = null;
+  try {
+    const tsEntrada = new Date(`${payload.entrada.fecha}T${String(payload.entrada.hora || "00:00:00").slice(0, 8)}`);
+    const tsSalida = new Date(`${payload.salida.fecha}T${String(payload.salida.hora || "00:00:00").slice(0, 8)}`);
+    const diffMs = tsSalida.getTime() - tsEntrada.getTime();
+    if (Number.isFinite(diffMs) && diffMs > 0) {
+      const totalMin = Math.round(diffMs / 60000);
+      const dias = Math.floor(totalMin / 1440);
+      const horas = Math.floor((totalMin % 1440) / 60);
+      const minutos = totalMin % 60;
+      horasTurnoAbierto = dias >= 1
+        ? `${dias}d ${horas}h ${minutos}m`
+        : `${horas}h ${minutos}m`;
+    }
+  } catch (_) { /* ignorar */ }
+
+  const nombre = payload.colaboradorCsv?.nombre || payload.colaborador.nombre || null;
+  const dni = payload.colaborador.dni;
+  const novedad = `Conductor ${nombre || "(sin nombre)"} (cedula ${dni}) | Turno abierto: ${horasTurnoAbierto || "n/d"} | Motivo: ${payload.motivo}`;
+
+  const body = {
+    tipo: "salida_manual_entrada_pendiente",
+    explicacion,
+    novedad,
+    hora_accion: horaAccion,
+    enviado_en: ahora.toISOString(),
+    registrado_por: {
+      user_id: state.user?.id ?? null,
+      email: state.user?.email ?? null
+    },
+    colaborador: {
+      id: payload.colaborador.id,
+      dni,
+      nombre,
+      cargo: payload.colaboradorCsv?.cargo || null,
+      empresa: payload.colaboradorCsv?.empresa || payload.colaborador.empresa || null,
+      obra_id: payload.colaborador.obra_id || null
+    },
+    entrada_pendiente: {
+      asistencia_id: payload.entrada.id,
+      fecha: payload.entrada.fecha,
+      hora: String(payload.entrada.hora || "").slice(0, 8)
+    },
+    salida_registrada: {
+      asistencia_id: payload.asistenciaId,
+      fecha: payload.salida.fecha,
+      hora: payload.salida.hora,
+      jornada_buk: payload.salida.jornada
+    },
+    horas_turno_abierto: horasTurnoAbierto,
+    motivo: payload.motivo,
+    buk: {
+      ok: payload.bukOk,
+      resultado: payload.bukResultado
+    }
+  };
+
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      mode: "no-cors"
+    });
+  } catch (error) {
+    console.warn("No se pudo notificar webhook de salida manual", error);
+  }
+}
+
+function renderLastEntradaLabel(entrada) {
+  if (!entrada) return 'Ultima entrada: <em>sin registros</em>';
+  const hora = String(entrada.hora || "").slice(0, 5);
+  const jornada = entrada.jornada && entrada.jornada !== entrada.fecha
+    ? ` (jornada ${escapeHtml(entrada.jornada)})`
+    : "";
+  const bukTag = entrada.enviado_buk
+    ? '<span style="color:#0a6b3b;font-weight:700">Buk OK</span>'
+    : `<span style="color:#b3261e;font-weight:700">Buk rechazo (${escapeHtml(String(entrada.buk_status || "sin enviar"))})</span>`;
+  return `Ultima entrada: <strong>${escapeHtml(entrada.fecha)} ${escapeHtml(hora)}</strong>${jornada} &middot; ${bukTag}`;
+}
+
+function renderTurnoEstadoLabel() {
+  if (!state.openEntrada && !state.lastEntrada) {
+    return 'Turno: <strong>sin marcas previas</strong>';
+  }
+  if (state.openEntrada) {
+    const hora = String(state.openEntrada.hora || "").slice(0, 5);
+    return `Turno: <strong style="color:#b35400">ABIERTO</strong> desde ${escapeHtml(state.openEntrada.fecha)} ${escapeHtml(hora)} - la proxima marca debe ser SALIDA`;
+  }
+  return 'Turno: <strong style="color:#0a6b3b">CERRADO</strong> - la proxima marca debe ser ENTRADA (jornada de hoy)';
+}
+
+function computeOpenEntrada() {
+  if (state.lastAttendance?.sentido === "entrada") {
+    state.openEntrada = state.lastAttendance;
+  } else {
+    state.openEntrada = null;
+  }
+}
+
+async function loadOpenTurns() {
+  if (!state.isAdmin) return;
+  if (!requireOnline(elements.openTurnsStatus)) return;
+
+  setBusy(elements.openTurnsReloadButton, true);
+  elements.openTurnsStatus.textContent = "Cargando turnos abiertos...";
+  elements.openTurnsBody.innerHTML = "";
+
+  try {
+    await ensureCsvLoaded();
+    const { data, error } = await supabaseClient
+      .from("asistencias")
+      .select("id,fecha,hora,jornada,sentido,enviado_buk,buk_status,colaborador_id,colaboradores(dni,nombre)")
+      .order("colaborador_id", { ascending: true })
+      .order("fecha", { ascending: false })
+      .order("hora", { ascending: false })
+      .limit(2000);
+
+    if (error) throw error;
+
+    const latestPorColaborador = new Map();
+    (data || []).forEach((mark) => {
+      if (!latestPorColaborador.has(mark.colaborador_id)) {
+        latestPorColaborador.set(mark.colaborador_id, mark);
+      }
+    });
+
+    const abiertos = Array.from(latestPorColaborador.values())
+      .filter((mark) => mark.sentido === "entrada")
+      .sort((a, b) => {
+        const tsA = new Date(`${a.fecha}T${String(a.hora).slice(0,8)}`).getTime();
+        const tsB = new Date(`${b.fecha}T${String(b.hora).slice(0,8)}`).getTime();
+        return tsA - tsB;
+      });
+
+    state.openTurns = abiertos;
+    populateOpenTurnsCargoFilter();
+    renderOpenTurns();
+    renderOverdueTurns();
+  } catch (error) {
+    elements.openTurnsStatus.textContent = error.message || "No se pudieron cargar los turnos abiertos.";
+  } finally {
+    setBusy(elements.openTurnsReloadButton, false);
+  }
+}
+
+const OVERDUE_HORAS = 15;
+
+function getOverdueTurns() {
+  const limite = Date.now() - OVERDUE_HORAS * 3600 * 1000;
+  return (state.openTurns || []).filter((mark) => {
+    const ts = new Date(`${mark.fecha}T${String(mark.hora).slice(0, 8)}`).getTime();
+    return !Number.isNaN(ts) && ts < limite;
+  });
+}
+
+function getOverdueDriverTurns() {
+  return getOverdueTurns().filter((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    return isDriverCargo(getCargoForDni(dni));
+  });
+}
+
+function renderOverdueTurns() {
+  const rows = getOverdueTurns();
+  const drivers = getOverdueDriverTurns();
+  updateOverdueBadge(drivers.length);
+  refreshOverdueDriversToast(drivers);
+  if (!rows.length) {
+    elements.overdueTurnsStatus.textContent = `Sin turnos abiertos hace mas de ${OVERDUE_HORAS} horas. Excelente.`;
+    elements.overdueTurnsBody.innerHTML = "";
+    return;
+  }
+  elements.overdueTurnsStatus.textContent = `${rows.length} colaborador(es) con turno vencido (>${OVERDUE_HORAS}h). Estos seguro necesitan cierre manual.`;
+
+  const ahora = Date.now();
+  elements.overdueTurnsBody.innerHTML = rows.map((mark) => {
+    const entradaTs = new Date(`${mark.fecha}T${String(mark.hora).slice(0, 8)}`).getTime();
+    const diffMs = ahora - entradaTs;
+    const horas = Math.floor(diffMs / 3600000);
+    const minutos = Math.floor((diffMs % 3600000) / 60000);
+    const dias = Math.floor(horas / 24);
+    const tiempoLabel = dias >= 1 ? `${dias}d ${horas % 24}h` : `${horas}h ${minutos}m`;
+    const claseTiempo = dias >= 1 ? "turno-alerta-critica" : "turno-alerta-media";
+    const dni = mark.colaboradores?.dni || "";
+    const nombre = mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "Sin nombre";
+    const cargo = getCargoForDni(dni) || "Sin cargo";
+
+    return `
+      <tr data-mark-id="${escapeHtml(mark.id)}" data-dni="${escapeHtml(dni)}">
+        <td>${escapeHtml(dni)}</td>
+        <td>${escapeHtml(nombre)}</td>
+        <td>${escapeHtml(cargo)}</td>
+        <td>${escapeHtml(mark.fecha)} ${escapeHtml(String(mark.hora).slice(0, 5))}</td>
+        <td class="${claseTiempo}">${escapeHtml(tiempoLabel)}</td>
+        <td>
+          <button type="button" class="secondary" data-close-turn="${escapeHtml(dni)}">
+            <i data-lucide="log-out"></i>
+            Cerrar turno
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+  renderIcons();
+}
+
+function refreshOverdueDriversToast(drivers) {
+  const toast = elements.overdueDriversToast;
+  if (!toast) return;
+  if (!state.isAdmin || !Array.isArray(drivers) || drivers.length === 0) {
+    toast.classList.add("hidden");
+    return;
+  }
+
+  const idsActuales = drivers.map((mark) => mark.id).sort().join("|");
+  if (state.overdueToastDismissed && idsActuales === state.overdueToastDismissedIds.join("|")) {
+    toast.classList.add("hidden");
+    return;
+  }
+  if (idsActuales !== state.overdueToastDismissedIds.join("|")) {
+    state.overdueToastDismissed = false;
+    state.overdueToastDismissedIds = [];
+  }
+
+  const ahora = Date.now();
+  const items = drivers.slice(0, 8).map((mark) => {
+    const ts = new Date(`${mark.fecha}T${String(mark.hora).slice(0, 8)}`).getTime();
+    const diffMs = ahora - ts;
+    const horas = Math.floor(diffMs / 3600000);
+    const minutos = Math.floor((diffMs % 3600000) / 60000);
+    const dias = Math.floor(horas / 24);
+    const tiempoLabel = dias >= 1 ? `${dias}d ${horas % 24}h` : `${horas}h ${minutos}m`;
+    const dni = mark.colaboradores?.dni || "";
+    const nombre = mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "Sin nombre";
+    return `
+      <li>
+        <span class="overdue-toast-driver">${escapeHtml(nombre)}</span>
+        <span class="overdue-toast-meta">${escapeHtml(dni)} &middot; entrada ${escapeHtml(mark.fecha)} ${escapeHtml(String(mark.hora).slice(0, 5))}</span>
+        <span class="overdue-toast-time">${escapeHtml(tiempoLabel)}</span>
+      </li>
+    `;
+  }).join("");
+
+  const restantes = drivers.length - Math.min(drivers.length, 8);
+  elements.overdueDriversToastTitle.textContent =
+    `${drivers.length} conductor(es) con turno > ${OVERDUE_HORAS} h`;
+  elements.overdueDriversToastList.innerHTML = items + (restantes > 0
+    ? `<li class="overdue-toast-more">+${restantes} mas</li>`
+    : "");
+  toast.classList.remove("hidden");
+  renderIcons();
+}
+
+function dismissOverdueDriversToast() {
+  state.overdueToastDismissed = true;
+  state.overdueToastDismissedIds = getOverdueDriverTurns().map((mark) => mark.id).sort();
+  elements.overdueDriversToast?.classList.add("hidden");
+}
+
+function exportOverdueTurnsToCSV() {
+  const rows = getOverdueTurns();
+  if (!rows.length) {
+    setMessage(elements.overdueTurnsStatus, "No hay turnos vencidos para exportar.", "error");
+    return;
+  }
+  exportTurnsToCsv(rows, `turnos-vencidos-${stampForFile()}.csv`);
+  setMessage(elements.overdueTurnsStatus, `${rows.length} fila(s) exportadas a CSV.`, "success");
+}
+
+function stampForFile() {
+  return new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+}
+
+function exportTurnsToCsv(rows, filename) {
+  const ahora = Date.now();
+  const header = ["Cedula", "Nombre", "Cargo", "Empresa", "Fecha entrada", "Hora entrada", "Jornada", "Tiempo abierto", "Buk"];
+  const escapeCsv = (val) => {
+    const s = String(val ?? "");
+    if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lineas = [header.join(";")];
+  rows.forEach((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    const nombre = mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "";
+    const entradaTs = new Date(`${mark.fecha}T${String(mark.hora).slice(0, 8)}`).getTime();
+    const diffMs = ahora - entradaTs;
+    const horas = Math.floor(diffMs / 3600000);
+    const minutos = Math.floor((diffMs % 3600000) / 60000);
+    const dias = Math.floor(horas / 24);
+    const tiempoLabel = dias >= 1 ? `${dias}d ${horas % 24}h` : `${horas}h ${minutos}m`;
+    const buk = mark.enviado_buk ? "Buk OK" : `Buk: ${mark.buk_status || "sin enviar"}`;
+    lineas.push([
+      dni,
+      nombre,
+      getCargoForDni(dni) || "",
+      getEmpresaForDni(dni) || "",
+      mark.fecha,
+      String(mark.hora).slice(0, 5),
+      mark.jornada || mark.fecha,
+      tiempoLabel,
+      buk
+    ].map(escapeCsv).join(";"));
+  });
+  triggerCsvDownload(lineas.join("\r\n"), filename);
+}
+
+function triggerCsvDownload(contenido, filename) {
+  const csv = "﻿" + contenido;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function populateOpenTurnsCargoFilter() {
+  const seleccionadosPrevios = new Set(
+    Array.from(elements.openTurnsCargoFilter.selectedOptions || []).map((o) => o.value)
+  );
+  const cargos = Array.from(new Set(
+    (state.openTurns || [])
+      .map((mark) => getCargoForDni(mark.colaboradores?.dni))
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b));
+
+  elements.openTurnsCargoFilter.innerHTML = cargos.map((cargo) => `
+    <option value="${escapeHtml(cargo)}" ${seleccionadosPrevios.has(cargo) ? "selected" : ""}>${escapeHtml(cargo)}</option>
+  `).join("");
+}
+
+function getSelectedOpenTurnsCargos() {
+  return Array.from(elements.openTurnsCargoFilter.selectedOptions || []).map((o) => o.value);
+}
+
+function renderOpenTurns() {
+  const all = state.openTurns || [];
+  if (!all.length) {
+    elements.openTurnsStatus.textContent = "No hay turnos abiertos. Todos los colaboradores cerraron su entrada.";
+    elements.openTurnsBody.innerHTML = "";
+    return;
+  }
+
+  const query = (elements.openTurnsSearchInput?.value || "").trim().toLowerCase();
+  const queryDni = normalizeDni(elements.openTurnsSearchInput?.value || "");
+  const cargosSeleccionados = getSelectedOpenTurnsCargos();
+
+  const rows = all.filter((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    const nombre = (mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "").toLowerCase();
+    const cargo = getCargoForDni(dni);
+
+    if (cargosSeleccionados.length && !cargosSeleccionados.includes(cargo)) return false;
+    if (query) {
+      const matchTexto = nombre.includes(query);
+      const matchDni = queryDni && normalizeDni(dni).includes(queryDni);
+      if (!matchTexto && !matchDni) return false;
+    }
+    return true;
+  });
+
+  elements.openTurnsStatus.textContent = rows.length === all.length
+    ? `${rows.length} colaborador(es) con turno abierto.`
+    : `${rows.length} de ${all.length} turnos abiertos (filtrado).`;
+
+  const ahora = Date.now();
+  elements.openTurnsBody.innerHTML = rows.map((mark) => {
+    const entradaTs = new Date(`${mark.fecha}T${String(mark.hora).slice(0,8)}`).getTime();
+    const diffMs = ahora - entradaTs;
+    const horas = Math.floor(diffMs / 3600000);
+    const minutos = Math.floor((diffMs % 3600000) / 60000);
+    const dias = Math.floor(horas / 24);
+    let tiempoLabel;
+    let claseTiempo;
+    if (dias >= 1) {
+      tiempoLabel = `${dias}d ${horas % 24}h`;
+      claseTiempo = "turno-alerta-critica";
+    } else if (horas >= 12) {
+      tiempoLabel = `${horas}h ${minutos}m`;
+      claseTiempo = "turno-alerta-media";
+    } else {
+      tiempoLabel = `${horas}h ${minutos}m`;
+      claseTiempo = "turno-alerta-ok";
+    }
+
+    const dni = mark.colaboradores?.dni || "";
+    const nombre = mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "Sin nombre";
+    const cargo = getCargoForDni(dni) || "Sin cargo";
+
+    return `
+      <tr data-mark-id="${escapeHtml(mark.id)}" data-dni="${escapeHtml(dni)}">
+        <td>${escapeHtml(dni)}</td>
+        <td>${escapeHtml(nombre)}</td>
+        <td>${escapeHtml(cargo)}</td>
+        <td>${escapeHtml(mark.fecha)} ${escapeHtml(String(mark.hora).slice(0,5))}</td>
+        <td class="${claseTiempo}">${escapeHtml(tiempoLabel)}</td>
+        <td>
+          <button type="button" class="secondary" data-close-turn="${escapeHtml(dni)}">
+            <i data-lucide="log-out"></i>
+            Cerrar turno
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+  renderIcons();
+}
+
+function getEmpresaForDni(dni) {
+  const csvRow = state.csvRows.find((row) => normalizeDni(row.cedula) === normalizeDni(dni));
+  return csvRow?.empresa || "";
+}
+
+function exportOpenTurnsToCSV() {
+  const all = state.openTurns || [];
+  if (!all.length) {
+    setMessage(elements.openTurnsStatus, "No hay turnos abiertos para exportar.", "error");
+    return;
+  }
+
+  const query = (elements.openTurnsSearchInput?.value || "").trim().toLowerCase();
+  const queryDni = normalizeDni(elements.openTurnsSearchInput?.value || "");
+  const cargosSeleccionados = getSelectedOpenTurnsCargos();
+
+  const rows = all.filter((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    const nombre = (mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "").toLowerCase();
+    const cargo = getCargoForDni(dni);
+    if (cargosSeleccionados.length && !cargosSeleccionados.includes(cargo)) return false;
+    if (query) {
+      const matchTexto = nombre.includes(query);
+      const matchDni = queryDni && normalizeDni(dni).includes(queryDni);
+      if (!matchTexto && !matchDni) return false;
+    }
+    return true;
+  });
+
+  if (!rows.length) {
+    setMessage(elements.openTurnsStatus, "El filtro actual no tiene resultados para exportar.", "error");
+    return;
+  }
+
+  const ahora = Date.now();
+  const header = [
+    "Cedula",
+    "Nombre",
+    "Cargo",
+    "Empresa",
+    "Fecha entrada",
+    "Hora entrada",
+    "Jornada",
+    "Tiempo abierto",
+    "Buk"
+  ];
+
+  const escapeCsv = (val) => {
+    const s = String(val ?? "");
+    if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const lineas = [header.join(";")];
+  rows.forEach((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    const nombre = mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "";
+    const cargo = getCargoForDni(dni) || "";
+    const empresa = getEmpresaForDni(dni) || "";
+    const entradaTs = new Date(`${mark.fecha}T${String(mark.hora).slice(0, 8)}`).getTime();
+    const diffMs = ahora - entradaTs;
+    const horas = Math.floor(diffMs / 3600000);
+    const minutos = Math.floor((diffMs % 3600000) / 60000);
+    const dias = Math.floor(horas / 24);
+    const tiempoLabel = dias >= 1 ? `${dias}d ${horas % 24}h` : `${horas}h ${minutos}m`;
+    const bukLabel = mark.enviado_buk ? "Buk OK" : `Buk: ${mark.buk_status || "sin enviar"}`;
+
+    lineas.push([
+      dni,
+      nombre,
+      cargo,
+      empresa,
+      mark.fecha,
+      String(mark.hora).slice(0, 5),
+      mark.jornada || mark.fecha,
+      tiempoLabel,
+      bukLabel
+    ].map(escapeCsv).join(";"));
+  });
+
+  const csv = "﻿" + lineas.join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+  a.href = url;
+  a.download = `turnos-abiertos-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+  setMessage(elements.openTurnsStatus, `${rows.length} fila(s) exportadas a CSV.`, "success");
+}
+
+async function quickCloseTurn(dni) {
+  if (!state.isAdmin) return;
+  if (!dni) return;
+  showTab("admin");
+  elements.manualDniInput.value = dni;
+  elements.manualDniInput.focus();
+  elements.manualDniInput.scrollIntoView({ behavior: "smooth", block: "center" });
+  setMessage(elements.manualMessage, "Completa fecha, hora y motivo para cerrar este turno.", "success");
+}
+
+function confirmGraphical(title, text, acceptLabel = "Confirmar", cancelLabel = "Cancelar") {
+  return new Promise((resolve) => {
+    elements.confirmTitle.textContent = title;
+    elements.confirmText.textContent = text;
+    elements.confirmAccept.textContent = acceptLabel;
+    elements.confirmCancel.textContent = cancelLabel;
+    elements.confirmOverlay.classList.remove("hidden");
+
+    const cleanup = () => {
+      elements.confirmOverlay.classList.add("hidden");
+      elements.confirmAccept.removeEventListener("click", onAccept);
+      elements.confirmCancel.removeEventListener("click", onCancel);
+    };
+    const onAccept = () => { cleanup(); resolve(true); };
+    const onCancel = () => { cleanup(); resolve(false); };
+
+    elements.confirmAccept.addEventListener("click", onAccept);
+    elements.confirmCancel.addEventListener("click", onCancel);
+  });
+}
+
+async function loadLastEntradaForDni(dni) {
+  const cleanDni = normalizeDni(dni);
+  if (!cleanDni) {
+    state.lastEntrada = null;
+    return null;
+  }
+  const { data, error } = await supabaseClient
+    .from("asistencias")
+    .select("id,fecha,hora,jornada,sentido,enviado_buk,buk_status,colaboradores!inner(dni,nombre)")
+    .eq("colaboradores.dni", cleanDni)
+    .eq("sentido", "entrada")
+    .order("fecha", { ascending: false })
+    .order("hora", { ascending: false })
+    .limit(1);
+  if (error) {
+    state.lastEntrada = null;
+    return null;
+  }
+  state.lastEntrada = data?.[0] || null;
+  return state.lastEntrada;
+}
+
+async function lookupObraIdDeColaborador(dni) {
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("consultar-colaborador-buk", {
+      body: { dni_colaborador: dni }
+    });
+    if (error || !data?.ok) {
+      console.warn("[BUK] lookup colaborador fallo", { error, data });
+      return { obraId: null, lookup: data || { error: error?.message || "sin respuesta" } };
+    }
+    return { obraId: data.obra_id_principal || data.obra_ids?.[0] || null, lookup: data };
+  } catch (error) {
+    console.warn("[BUK] lookup colaborador excepcion", error);
+    return { obraId: null, lookup: { error: error?.message || "excepcion en lookup" } };
+  }
+}
+
+async function findEntradaToCloseSalida(dni, salidaFecha, salidaHora) {
+  const cleanDni = normalizeDni(dni);
+  if (!cleanDni) return null;
+
+  const diaAnterior = addDays(salidaFecha, -1);
+
+  const { data, error } = await supabaseClient
+    .from("asistencias")
+    .select("id,fecha,hora,jornada,sentido,colaboradores!inner(dni)")
+    .eq("colaboradores.dni", cleanDni)
+    .eq("sentido", "entrada")
+    .in("fecha", [salidaFecha, diaAnterior])
+    .order("fecha", { ascending: false })
+    .order("hora", { ascending: false })
+    .limit(20);
+
+  if (error || !Array.isArray(data)) return null;
+
+  const salidaHoraNorm = String(salidaHora || "").length === 5 ? `${salidaHora}:00` : salidaHora;
+  const salidaTs = new Date(`${salidaFecha}T${salidaHoraNorm}`).getTime();
+  if (Number.isNaN(salidaTs)) return null;
+
+  return data.find((row) => {
+    const horaNorm = String(row.hora || "").slice(0, 8);
+    const ts = new Date(`${row.fecha}T${horaNorm}`).getTime();
+    return !Number.isNaN(ts) && ts < salidaTs;
+  }) || null;
+}
+
+function bukRespuestaMencionaEntradaPrevia(bukData) {
+  if (!bukData) return false;
+  const textos = [
+    bukData?.error,
+    bukData?.respuesta?.error,
+    ...(Array.isArray(bukData?.intentos) ? bukData.intentos.map((i) => i?.error || i?.respuesta?.error) : [])
+  ].filter(Boolean).map(String);
+  return textos.some((t) => /no existe una marca de entrada previa/i.test(t));
+}
+
+function computeJornadaForMark(sentido, fechaMarca, lastEntradaFecha) {
+  if (sentido !== "salida") return fechaMarca;
+  const lastFecha = lastEntradaFecha
+    ?? (state.lastAttendance?.sentido === "entrada" ? state.lastAttendance.fecha : null);
+  if (lastFecha && lastFecha < fechaMarca) return lastFecha;
+  return fechaMarca;
 }
 
 async function loadCollaboratorsCsv() {
@@ -2410,21 +3293,47 @@ async function loadAdminMarks() {
   if (!requireOnline(elements.adminMarksStatus)) return;
 
   await ensureCsvLoaded();
-  elements.adminMarksStatus.textContent = "Cargando marcas...";
+  const desde = (elements.adminDateFromInput.value || "").trim();
+  const hasta = (elements.adminDateToInput.value || "").trim();
 
-  const { data, error } = await supabaseClient
-    .from("asistencias")
-    .select("id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,colaboradores(dni,nombre)")
-    .order("fecha", { ascending: false })
-    .order("hora", { ascending: false })
-    .limit(500);
-
-  if (error) {
-    elements.adminMarksStatus.textContent = "No se pudieron cargar las marcas.";
+  if (desde && hasta && desde > hasta) {
+    elements.adminMarksStatus.textContent = "El rango de fechas es invalido (Desde > Hasta).";
     return;
   }
 
-  state.adminMarks = data || [];
+  elements.adminMarksStatus.textContent = "Cargando marcas...";
+
+  const conRango = Boolean(desde || hasta);
+  const PAGE = 1000;
+  const TOPE = conRango ? 20000 : 1000;
+  let acumulado = [];
+  let offset = 0;
+
+  while (offset < TOPE) {
+    let query = supabaseClient
+      .from("asistencias")
+      .select("id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,colaboradores(dni,nombre)")
+      .order("fecha", { ascending: false })
+      .order("hora", { ascending: false });
+
+    if (desde) query = query.gte("fecha", desde);
+    if (hasta) query = query.lte("fecha", hasta);
+    query = query.range(offset, offset + PAGE - 1);
+
+    elements.adminMarksStatus.textContent = `Cargando marcas... (${acumulado.length})`;
+    const { data, error } = await query;
+    if (error) {
+      elements.adminMarksStatus.textContent = "No se pudieron cargar las marcas.";
+      return;
+    }
+    const batch = data || [];
+    acumulado = acumulado.concat(batch);
+    if (batch.length < PAGE) break;
+    offset += PAGE;
+    if (!conRango) break;
+  }
+
+  state.adminMarks = acumulado;
   populateAdminCargoFilter();
   state.adminPage = 1;
   renderAdminMarks();
@@ -2433,7 +3342,8 @@ async function loadAdminMarks() {
 function renderAdminMarks() {
   const nameQuery = elements.adminNameSearchInput.value.trim().toLowerCase();
   const dniQuery = normalizeDni(elements.adminDniSearchInput.value);
-  const dateQuery = elements.adminDateSearchInput.value;
+  const desde = (elements.adminDateFromInput.value || "").trim();
+  const hasta = (elements.adminDateToInput.value || "").trim();
   const selectedCargos = getSelectedAdminCargos();
   const rows = buildAdminJourneys(state.adminMarks).filter((item) => {
     const dni = item.dni || "";
@@ -2442,7 +3352,11 @@ function renderAdminMarks() {
 
     if (nameQuery && !name.toLowerCase().includes(nameQuery)) return false;
     if (dniQuery && !normalizeDni(dni).includes(dniQuery)) return false;
-    if (dateQuery && item.fecha !== dateQuery && item.salidaFecha !== dateQuery) return false;
+    if (desde || hasta) {
+      const fechas = [item.fecha, item.salidaFecha].filter(Boolean);
+      const dentro = fechas.some((f) => (!desde || f >= desde) && (!hasta || f <= hasta));
+      if (!dentro) return false;
+    }
     if (selectedCargos.length && !selectedCargos.includes(cargo)) return false;
     return true;
   });
@@ -2465,7 +3379,6 @@ function renderAdminMarks() {
       <td>${renderJourneyMark(item.entrada, "entrada")}</td>
       <td>${renderJourneyMark(item.salida, "salida")}</td>
       <td>${escapeHtml(item.tiempo || "")}</td>
-      <td>${renderJourneyBuk(item)}</td>
       <td>${escapeHtml(item.observacion || "")}</td>
     </tr>
   `).join("");
@@ -2608,29 +3521,81 @@ function getDisplayNameForDni(dni, localName = "") {
 
 function renderSonarDriverOptions() {
   const query = elements.sonarDriverSearchInput.value.trim().toLowerCase();
-  const drivers = state.sonarDrivers.filter((driver) => {
+  const todos = state.sonarDrivers || [];
+  const drivers = todos.filter((driver) => {
     if (!query) return true;
     return [driver.cedula, driver.nombre, driver.dr_id]
       .some((value) => String(value || "").toLowerCase().includes(query));
   });
 
   elements.sonarDriverSelect.innerHTML = `
-    <option value="">${drivers.length ? "Selecciona conductor Sonar" : "Sin coincidencias"}</option>
-    ${drivers.map((driver) => `
+    <option value="">Selecciona conductor Sonar</option>
+    ${todos.map((driver) => `
       <option
         value="${escapeHtml(driver.dr_id)}"
         data-cedula="${escapeHtml(driver.cedula || "")}"
         data-nombre="${escapeHtml(driver.nombre || "")}"
-      >
-        ${escapeHtml(driver.cedula || "Sin cédula")} - ${escapeHtml(driver.nombre || "Sin nombre")} (${escapeHtml(driver.dr_id)})
-      </option>
+      >${escapeHtml(driver.cedula || "Sin cédula")} - ${escapeHtml(driver.nombre || "Sin nombre")}</option>
     `).join("")}
   `;
+  if (state.selectedSonarDriverId) {
+    elements.sonarDriverSelect.value = state.selectedSonarDriverId;
+  }
+
+  const visibles = drivers.slice(0, 50);
+  if (!drivers.length) {
+    elements.sonarDriverList.innerHTML = `<li class="sonar-driver-list-empty">${todos.length ? "No hay conductores para mostrar con ese filtro." : "Carga la base con Consumir conductores."}</li>`;
+  } else {
+    elements.sonarDriverList.innerHTML = visibles.map((driver) => {
+      const seleccionado = state.selectedSonarDriverId === driver.dr_id;
+      return `
+        <li class="sonar-driver-item ${seleccionado ? "selected" : ""}"
+            data-driver-id="${escapeHtml(driver.dr_id)}"
+            data-cedula="${escapeHtml(driver.cedula || "")}"
+            data-nombre="${escapeHtml(driver.nombre || "")}"
+            role="option"
+            aria-selected="${seleccionado}">
+          <div>
+            <div>${escapeHtml(driver.nombre || "Sin nombre")}</div>
+            <div class="driver-meta">CC ${escapeHtml(driver.cedula || "Sin cedula")} &middot; dr_id ${escapeHtml(driver.dr_id)}</div>
+          </div>
+          ${seleccionado ? '<i data-lucide="check"></i>' : ""}
+        </li>
+      `;
+    }).join("");
+    if (drivers.length > visibles.length) {
+      elements.sonarDriverList.innerHTML += `<li class="sonar-driver-list-empty">Mostrando ${visibles.length} de ${drivers.length}. Refina la busqueda para ver mas.</li>`;
+    }
+    renderIcons();
+  }
 
   elements.sonarAdminStatus.className = "result-box";
   elements.sonarAdminStatus.innerHTML = drivers.length
-    ? `<strong>${drivers.length}</strong> conductores listos para selección.`
-    : "No hay conductores para mostrar con ese filtro.";
+    ? `<strong>${drivers.length}</strong> conductor(es) coinciden con "${escapeHtml(query) || "todos"}".`
+    : (todos.length ? "No hay conductores para mostrar con ese filtro." : "Aun no hay conductores cargados.");
+
+  renderSonarDriverSelectedLabel();
+}
+
+function renderSonarDriverSelectedLabel() {
+  if (!elements.sonarDriverSelected) return;
+  const driver = (state.sonarDrivers || []).find((d) => d.dr_id === state.selectedSonarDriverId);
+  if (!driver) {
+    elements.sonarDriverSelected.innerHTML = '<span class="muted">Ningun conductor seleccionado.</span>';
+    return;
+  }
+  elements.sonarDriverSelected.innerHTML = `
+    Conductor: <strong>${escapeHtml(driver.nombre || "Sin nombre")}</strong> &middot;
+    CC ${escapeHtml(driver.cedula || "Sin cedula")} &middot;
+    dr_id <strong>${escapeHtml(driver.dr_id)}</strong>
+  `;
+}
+
+function selectSonarDriver(driverId) {
+  state.selectedSonarDriverId = driverId || null;
+  elements.sonarDriverSelect.value = driverId || "";
+  renderSonarDriverOptions();
+  updateSonarSelectionBox();
 }
 
 function updateSonarSelectionBox() {
@@ -2881,18 +3846,34 @@ async function registerManualExit(event) {
 
     const { data: lastRows, error: lastError } = await supabaseClient
       .from("asistencias")
-      .select("sentido,hora")
+      .select("sentido,fecha,hora")
       .eq("colaborador_id", colaborador.id)
-      .eq("fecha", fecha)
-      .order("created_at", { ascending: false })
+      .order("fecha", { ascending: false })
+      .order("hora", { ascending: false })
       .limit(1);
 
     if (lastError) throw lastError;
 
     const last = lastRows?.[0];
     if (!last || last.sentido !== "entrada") {
-      setMessage(elements.manualMessage, "No se puede registrar salida manual: primero debe existir una entrada abierta.", "error");
+      const detalle = last
+        ? `La ultima marca fue una ${last.sentido} el ${last.fecha} ${String(last.hora).slice(0, 5)}.`
+        : "El colaborador no tiene marcas registradas.";
+      setMessage(elements.manualMessage, "No se puede registrar salida manual: el colaborador no tiene entrada abierta.", "error");
+      showAlertModal(
+        "Sin entrada abierta",
+        `No se puede registrar la salida manual: ${detalle} Verifica con el colaborador antes de continuar.`
+      );
       return;
+    }
+
+    const jornadaBuk = computeJornadaForMark("salida", fecha, last.fecha);
+
+    if (jornadaBuk !== fecha) {
+      showAlertModal(
+        "Cierre de turno nocturno",
+        `Esta salida cerrara la jornada ${jornadaBuk} (entrada del ${last.fecha} a las ${String(last.hora).slice(0, 5)}).`
+      );
     }
 
     const observacion = `Salida manual. Motivo: ${motivo}`;
@@ -2903,38 +3884,54 @@ async function registerManualExit(event) {
         obra_id: colaborador.obra_id,
         fecha,
         hora,
-        jornada: fecha,
+        jornada: jornadaBuk,
         sentido: "salida",
         origen: "manual",
         registrado_por: state.user.id,
         observacion
       })
       .select("id")
-      .maybeSingle();
+      .single();
 
     if (insertError) throw insertError;
 
-    const bukBody = {
-      obra_id: BUK_OBRA_ID,
-      dni_colaborador: colaborador.dni,
-      jornada: fecha,
-      fecha,
-      hora,
-      sentido: "salida"
-    };
-    if (insertedAttendance?.id) bukBody.asistencia_id = insertedAttendance.id;
+    const { obraId: obraIdReal } = await lookupObraIdDeColaborador(colaborador.dni);
+    const obraIdAUsar = obraIdReal || BUK_OBRA_ID;
+
     const { data: bukData, error: bukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-      body: bukBody
+      body: {
+        asistencia_id: insertedAttendance.id,
+        obra_id: obraIdAUsar,
+        dni_colaborador: colaborador.dni,
+        jornada: jornadaBuk,
+        fecha,
+        hora,
+        sentido: "salida"
+      }
     });
 
-    if (bukError || !bukData?.ok) {
-      setMessage(elements.manualMessage, "Salida guardada, pero no se pudo enviar a Buk/Ctrlit.", "error");
+    const bukOk = !bukError && !!bukData?.ok;
+
+    await notifyManualAdminExitWebhook({
+      colaborador,
+      colaboradorCsv: csvCollaborator,
+      entrada: last,
+      salida: { fecha, hora, jornada: jornadaBuk },
+      motivo,
+      bukOk,
+      bukResultado: bukData ?? { error: bukError?.message || "sin respuesta" },
+      asistenciaId: insertedAttendance.id
+    });
+
+    if (!bukOk) {
+      setMessage(elements.manualMessage, "Salida guardada, pero no se pudo enviar a Buk/Ctrlit. Administracion fue notificada.", "error");
     } else {
-      setMessage(elements.manualMessage, "Salida manual registrada y enviada a Buk/Ctrlit.", "success");
+      setMessage(elements.manualMessage, "Salida manual registrada y enviada a Buk/Ctrlit. Administracion fue notificada.", "success");
     }
 
     elements.manualReasonInput.value = "";
     await loadAdminMarks();
+    loadOpenTurns().catch(() => {});
   } catch (error) {
     setMessage(elements.manualMessage, error.message || "No se pudo registrar la salida manual.", "error");
   } finally {
@@ -3160,7 +4157,23 @@ elements.vehicleInput.addEventListener("change", () => {
 });
 elements.captureButton.addEventListener("click", capturePhoto);
 elements.stopCameraButton.addEventListener("click", stopCamera);
+elements.overdueDriversToastClose.addEventListener("click", dismissOverdueDriversToast);
+elements.overdueDriversToastGo.addEventListener("click", () => {
+  dismissOverdueDriversToast();
+  showTab("admin");
+  showAdminSubtab("alerts");
+  document.getElementById("overdueTurnsPanel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+elements.adminSubtabs?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-admin-tab]");
+  if (!btn) return;
+  showAdminSubtab(btn.dataset.adminTab);
+});
 elements.attendanceForm.addEventListener("submit", submitAttendance);
+elements.reportDateInput.addEventListener("input", () => { state.reportDateTouched = true; });
+elements.reportTimeInput.addEventListener("input", () => { state.reportTimeTouched = true; });
+elements.sentidoEntradaButton.addEventListener("click", () => setSentido("entrada"));
+elements.sentidoSalidaButton.addEventListener("click", () => setSentido("salida"));
 elements.refreshButton.addEventListener("click", refreshCurrentHistory);
 elements.historySearchButton.addEventListener("click", refreshCurrentHistory);
 elements.historyDniInput.addEventListener("keydown", (event) => {
@@ -3184,29 +4197,60 @@ elements.historyNextPageButton.addEventListener("click", () => {
   refreshCurrentHistory("keep-page");
 });
 elements.alertButton.addEventListener("click", async () => {
-  const shouldReopenCamera = alertReopenCamera;
-  alertReopenCamera = false;
   hideAlertModal();
-  if (shouldReopenCamera && state.csvCandidate) {
+  const registerVisible = !elements.registerPanel.classList.contains("hidden");
+  if (state.csvCandidate && registerVisible) {
     await startCamera();
   }
 });
+elements.pendingExitCancel.addEventListener("click", () => {
+  closePendingExitModal();
+});
+elements.pendingExitForm.addEventListener("submit", submitPendingExitFromModal);
+elements.openTurnsReloadButton.addEventListener("click", loadOpenTurns);
+elements.openTurnsExportButton.addEventListener("click", exportOpenTurnsToCSV);
+elements.overdueTurnsExportButton.addEventListener("click", exportOverdueTurnsToCSV);
+elements.overdueTurnsBody.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-close-turn]");
+  if (!button) return;
+  quickCloseTurn(button.dataset.closeTurn);
+});
+elements.openTurnsBody.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-close-turn]");
+  if (!button) return;
+  quickCloseTurn(button.dataset.closeTurn);
+});
+elements.openTurnsSearchInput.addEventListener("input", () => renderOpenTurns());
+elements.openTurnsCargoFilter.addEventListener("change", () => renderOpenTurns());
 elements.reloadCsvButton.addEventListener("click", loadCollaboratorsCsv);
 elements.csvSearchInput.addEventListener("input", renderCsvTable);
 elements.manualExitForm.addEventListener("submit", registerManualExit);
 elements.sonarAdminForm.addEventListener("submit", assignSonarDriverManually);
 elements.loadSonarDriversButton.addEventListener("click", loadSonarDrivers);
 elements.sonarDriverSearchInput.addEventListener("input", renderSonarDriverOptions);
-elements.sonarDriverSelect.addEventListener("change", updateSonarSelectionBox);
+elements.sonarDriverSelect.addEventListener("change", () => {
+  state.selectedSonarDriverId = elements.sonarDriverSelect.value || null;
+  renderSonarDriverSelectedLabel();
+  updateSonarSelectionBox();
+});
+elements.sonarDriverList.addEventListener("click", (event) => {
+  const item = event.target.closest(".sonar-driver-item[data-driver-id]");
+  if (!item) return;
+  selectSonarDriver(item.dataset.driverId);
+});
 elements.sonarVehicleSelect.addEventListener("change", updateSonarSelectionBox);
 elements.reloadMarksButton.addEventListener("click", loadAdminMarks);
 elements.adminDniSearchInput.addEventListener("input", () => {
   state.adminPage = 1;
   renderAdminMarks();
 });
-elements.adminDateSearchInput.addEventListener("input", () => {
+elements.adminDateFromInput.addEventListener("change", () => {
   state.adminPage = 1;
-  renderAdminMarks();
+  loadAdminMarks();
+});
+elements.adminDateToInput.addEventListener("change", () => {
+  state.adminPage = 1;
+  loadAdminMarks();
 });
 elements.adminNameSearchInput.addEventListener("input", () => {
   state.adminPage = 1;
@@ -3232,43 +4276,103 @@ elements.csvTableBody.addEventListener("click", (event) => {
   if (button) useCsvDni(button.dataset.useDni);
 });
 
-elements.confirmAcceptButton.addEventListener("click", () => resolveConfirmModal(true));
-elements.confirmCancelButton.addEventListener("click", () => resolveConfirmModal(false));
-elements.confirmOverlay.addEventListener("click", (event) => {
-  if (event.target === elements.confirmOverlay) resolveConfirmModal(false);
-});
+init();
 
-function registerServiceWorker() {
+(function registrarServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
-  if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") return;
+  if (location.protocol !== "https:" && location.hostname !== "localhost" && location.hostname !== "127.0.0.1") {
+    return;
+  }
 
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js")
+    navigator.serviceWorker.register("./sw.js", { scope: "./" })
       .then((reg) => {
-        if (reg.waiting) reg.waiting.postMessage({ type: "SKIP_WAITING" });
+        if (reg.waiting && navigator.serviceWorker.controller) {
+          mostrarBannerActualizacion(reg);
+        }
+
         reg.addEventListener("updatefound", () => {
-          const newWorker = reg.installing;
-          if (!newWorker) return;
-          newWorker.addEventListener("statechange", () => {
-            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-              newWorker.postMessage({ type: "SKIP_WAITING" });
+          const nuevoSw = reg.installing;
+          if (!nuevoSw) return;
+          nuevoSw.addEventListener("statechange", () => {
+            if (nuevoSw.state === "installed" && navigator.serviceWorker.controller) {
+              mostrarBannerActualizacion(reg);
             }
           });
         });
-        reg.update().catch(() => null);
-        setInterval(() => reg.update().catch(() => null), 60 * 60 * 1000);
-      })
-      .catch(() => null);
 
-    let reloaded = false;
+        reg.update().catch(() => {});
+        setInterval(() => { reg.update().catch(() => {}); }, 5 * 60 * 1000);
+
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") {
+            reg.update().catch(() => {});
+          }
+        });
+      })
+      .catch((error) => console.warn("[PWA] no se pudo registrar SW", error));
+
+    let recargandoPorSw = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
-      if (reloaded) return;
-      reloaded = true;
+      if (recargandoPorSw) return;
+      recargandoPorSw = true;
       window.location.reload();
     });
   });
+})();
+
+function mostrarBannerActualizacion(reg) {
+  const banner = document.getElementById("updateBanner");
+  const boton = document.getElementById("updateBannerButton");
+  if (!banner || !boton) return;
+  banner.classList.remove("hidden");
+  boton.onclick = () => {
+    if (reg.waiting) {
+      reg.waiting.postMessage({ type: "SKIP_WAITING" });
+    } else {
+      window.location.reload();
+    }
+  };
 }
 
-registerServiceWorker();
+(function configurarInstalacionPWA() {
+  let deferredPrompt = null;
+  const boton = document.getElementById("installPwaButton");
 
-init();
+  const yaInstaladaStandalone = () =>
+    window.matchMedia?.("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true;
+
+  if (yaInstaladaStandalone()) {
+    if (boton) boton.classList.add("hidden");
+    return;
+  }
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    deferredPrompt = event;
+    if (boton) boton.classList.remove("hidden");
+  });
+
+  window.addEventListener("appinstalled", () => {
+    deferredPrompt = null;
+    if (boton) boton.classList.add("hidden");
+  });
+
+  if (boton) {
+    boton.addEventListener("click", async () => {
+      if (!deferredPrompt) return;
+      try {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === "accepted") {
+          boton.classList.add("hidden");
+        }
+      } catch (error) {
+        console.warn("[PWA] no se pudo mostrar prompt de instalacion", error);
+      } finally {
+        deferredPrompt = null;
+      }
+    });
+  }
+})();
