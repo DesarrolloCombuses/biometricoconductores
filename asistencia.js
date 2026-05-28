@@ -87,6 +87,7 @@ const state = {
   liveFaceOk: false,
   serverClock: null,
   serverClockTimer: null,
+  serverClockResyncTimer: null,
   reportDateTouched: false,
   reportTimeTouched: false,
   csvRows: [],
@@ -448,12 +449,14 @@ function requireOnline(messageTarget = elements.formMessage) {
   return false;
 }
 
-async function syncServerClock() {
+async function syncServerClock({ silent = false } = {}) {
   if (!requireOnline()) return null;
 
   const { data, error } = await supabaseClient.rpc("obtener_hora_servidor_colombia");
   if (error || !data) {
-    setMessage(elements.formMessage, "No se pudo sincronizar la hora del servidor.", "error");
+    if (!silent) {
+      setMessage(elements.formMessage, "No se pudo sincronizar la hora del servidor.", "error");
+    }
     return null;
   }
 
@@ -477,12 +480,8 @@ function getTrustedNowParts() {
 
 function renderServerClock() {
   const now = getTrustedNowParts();
-  if (!state.reportDateTouched && !elements.reportDateInput.value) {
-    elements.reportDateInput.value = now.date;
-  }
-  if (!state.reportTimeTouched && !elements.reportTimeInput.value) {
-    elements.reportTimeInput.value = now.time.slice(0, 5);
-  }
+  elements.reportDateInput.value = now.date;
+  elements.reportTimeInput.value = now.time.slice(0, 5);
 }
 
 function configureReportTimeControls() {
@@ -495,20 +494,36 @@ function configureReportTimeControls() {
 
 function getReportParts() {
   const now = getTrustedNowParts();
-  const date = elements.reportDateInput.value || now.date;
-  const timeValue = elements.reportTimeInput.value || now.time.slice(0, 5);
-  const time = timeValue.length === 5 ? `${timeValue}:00` : timeValue;
+  const date = now.date;
+  const time = now.time;
   const [year, month, day] = date.split("-");
   return { year, month, day, date, time };
 }
 
+const SERVER_CLOCK_RESYNC_MS = 3 * 60 * 1000;
+
 function startServerClock() {
   window.clearInterval(state.serverClockTimer);
+  window.clearInterval(state.serverClockResyncTimer);
   syncServerClock();
   state.serverClockTimer = window.setInterval(() => {
     if (state.serverClock) renderServerClock();
   }, 1000);
+  state.serverClockResyncTimer = window.setInterval(() => {
+    syncServerClock({ silent: true });
+  }, SERVER_CLOCK_RESYNC_MS);
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && state.user) {
+    syncServerClock({ silent: true });
+  }
+});
+window.addEventListener("online", () => {
+  if (state.user) {
+    syncServerClock({ silent: true });
+  }
+});
 
 async function init() {
   renderIcons();
@@ -550,9 +565,15 @@ function showLogin() {
   clearHistoryPanel();
 }
 
+function getDisplayNameForUser(user) {
+  if (!user) return "Usuario autenticado";
+  const meta = user.user_metadata || {};
+  return meta.display_name || meta.full_name || meta.name || user.email || "Usuario autenticado";
+}
+
 async function showApp(user) {
   state.user = user;
-  elements.userLabel.textContent = user.email || "Usuario autenticado";
+  elements.userLabel.textContent = getDisplayNameForUser(user);
   elements.loginView.classList.add("hidden");
   elements.appView.classList.remove("hidden");
   await loadProfile();

@@ -1,4 +1,4 @@
-const APP_VERSION = "20260527-migration-from-old";
+const APP_VERSION = "20260527-clock-resync";
 const CACHE_NAME = `combuses-asistencia-${APP_VERSION}`;
 const APP_SHELL = [
   "./asistencia-web.html",
