@@ -9,6 +9,16 @@ const FACE_FALLBACK_DELAY_MS = 5000;
 const FACE_IMAGE_CHECK_TIMEOUT_MS = 4500;
 const FACE_IDENTITY_TIMEOUT_MS = 6500;
 
+// Fecha de corte: la logica de "ultima marca / turno abierto" solo considera
+// marcas de esta fecha en adelante. Asi los turnos viejos (anteriores) no se
+// arrastran al flujo y empezamos limpio desde el 9 de julio de 2026.
+const FECHA_CORTE_VALIDACIONES = "2026-07-09";
+
+// TEMPORAL (pruebas): muestra el boton "Eliminar" en cada marca del panel de
+// Administracion para poder borrar marcas de prueba. Poner en false para
+// ocultarlo cuando terminen las pruebas.
+const HABILITAR_ELIMINAR_MARCAS = true;
+
 const $ = (selector) => document.querySelector(selector);
 
 function detectDeviceMode() {
@@ -51,10 +61,11 @@ function updateDeviceModeBadge(modo) {
 }
 
 applyDeviceMode();
-window.addEventListener("resize", () => { applyDeviceMode(); });
-window.addEventListener("orientationchange", () => { applyDeviceMode(); });
+window.addEventListener("resize", () => { applyDeviceMode(); if (typeof applyTabVisibility === "function") applyTabVisibility(); });
+window.addEventListener("orientationchange", () => { applyDeviceMode(); if (typeof applyTabVisibility === "function") applyTabVisibility(); });
 
 const state = {
+  deviceMode: detectDeviceMode(),
   user: null,
   colaborador: null,
   csvCandidate: null,
@@ -105,7 +116,28 @@ const state = {
   sonarDrivers: [],
   cameraMode: "attendance",
   enrollCandidate: null,
-  enrollColaborador: null
+  enrollColaborador: null,
+  manualAuthId: null,
+  manualLocation: null,
+  manualSelfieBlob: null,
+  manualCameraStream: null,
+  journalMarks: [],
+  journalFiltered: [],
+  journalPage: 1,
+  journalPageSize: 15,
+  journalLoaded: false,
+  rechazoMarks: [],
+  rechazoFiltered: [],
+  rechazoPage: 1,
+  rechazoPageSize: 15,
+  rechazoLoaded: false,
+  inconsistMarks: [],
+  inconsistRows: [],
+  inconsistLoaded: false,
+  sinMarcaRows: [],
+  sinMarcaLoaded: false,
+  validacionRows: [],
+  validacionLoaded: false
 };
 
 const elements = {
@@ -115,6 +147,7 @@ const elements = {
   historyTabButton: $("#historyTabButton"),
   databaseTabButton: $("#databaseTabButton"),
   adminTabButton: $("#adminTabButton"),
+  manualExitTabButton: $("#manualExitTabButton"),
   adminTabBadge: $("#adminTabBadge"),
   adminSubtabs: $("#adminSubtabs"),
   adminSubtabAlertsBadge: $("#adminSubtabAlertsBadge"),
@@ -127,6 +160,7 @@ const elements = {
   historyPanel: $("#historyPanel"),
   databasePanel: $("#databasePanel"),
   adminPanel: $("#adminPanel"),
+  manualExitPanel: $("#manualExitPanel"),
   loginForm: $("#loginForm"),
   loginMessage: $("#loginMessage"),
   emailInput: $("#emailInput"),
@@ -138,6 +172,7 @@ const elements = {
   dniInput: $("#dniInput"),
   searchButton: $("#searchButton"),
   collaboratorBox: $("#collaboratorBox"),
+  turnoStatusBanner: $("#turnoStatusBanner"),
   reportDateInput: $("#reportDateInput"),
   reportTimeInput: $("#reportTimeInput"),
   reportTimeHint: $("#reportTimeHint"),
@@ -145,6 +180,7 @@ const elements = {
   vehicleInput: $("#vehicleInput"),
   baseInput: $("#baseInput"),
   attendanceDriverBox: $("#attendanceDriverBox"),
+  locationSection: $("#locationSection"),
   locationStatus: $("#locationStatus"),
   locationButton: $("#locationButton"),
   locationMap: $("#locationMap"),
@@ -158,6 +194,22 @@ const elements = {
   stepPhoto: $("#stepPhoto"),
   stepRegister: $("#stepRegister"),
   observacionInput: $("#observacionInput"),
+  celularComprobanteInput: $("#celularComprobanteInput"),
+  tutorialButton: $("#tutorialButton"),
+  tutorialOverlay: $("#tutorialOverlay"),
+  tutorialClose: $("#tutorialClose"),
+  tutorialIcon: $("#tutorialIcon"),
+  tutorialStepNum: $("#tutorialStepNum"),
+  tutorialTitle: $("#tutorialTitle"),
+  tutorialText: $("#tutorialText"),
+  tutorialDots: $("#tutorialDots"),
+  tutorialPrev: $("#tutorialPrev"),
+  tutorialNext: $("#tutorialNext"),
+  adminClaveOverlay: $("#adminClaveOverlay"),
+  adminClaveInput: $("#adminClaveInput"),
+  adminClaveError: $("#adminClaveError"),
+  adminClaveAccept: $("#adminClaveAccept"),
+  adminClaveCancel: $("#adminClaveCancel"),
   cameraButton: $("#cameraButton"),
   cameraBox: $("#cameraBox"),
   cameraVideo: $("#cameraVideo"),
@@ -180,6 +232,12 @@ const elements = {
   alertTitle: $("#alertTitle"),
   alertText: $("#alertText"),
   alertButton: $("#alertButton"),
+  registroSuccessOverlay: $("#registroSuccessOverlay"),
+  registroSuccessModal: $("#registroSuccessOverlay .registro-success-modal"),
+  registroSuccessTitle: $("#registroSuccessTitle"),
+  registroSuccessSubtitle: $("#registroSuccessSubtitle"),
+  registroSuccessBody: $("#registroSuccessBody"),
+  registroSuccessButton: $("#registroSuccessButton"),
   confirmOverlay: $("#confirmOverlay"),
   confirmTitle: $("#confirmTitle"),
   confirmText: $("#confirmText"),
@@ -194,15 +252,6 @@ const elements = {
   overdueTurnsStatus: $("#overdueTurnsStatus"),
   overdueTurnsBody: $("#overdueTurnsBody"),
   overdueTurnsExportButton: $("#overdueTurnsExportButton"),
-  pendingExitOverlay: $("#pendingExitOverlay"),
-  pendingExitForm: $("#pendingExitForm"),
-  pendingExitContext: $("#pendingExitContext"),
-  pendingExitDate: $("#pendingExitDate"),
-  pendingExitTime: $("#pendingExitTime"),
-  pendingExitReason: $("#pendingExitReason"),
-  pendingExitMessage: $("#pendingExitMessage"),
-  pendingExitCancel: $("#pendingExitCancel"),
-  pendingExitSubmit: $("#pendingExitSubmit"),
   refreshButton: $("#refreshButton"),
   historyDniInput: $("#historyDniInput"),
   historyStartDateInput: $("#historyStartDateInput"),
@@ -225,9 +274,23 @@ const elements = {
   manualDniInput: $("#manualDniInput"),
   manualDateInput: $("#manualDateInput"),
   manualTimeInput: $("#manualTimeInput"),
+  manualReasonCategory: $("#manualReasonCategory"),
   manualReasonInput: $("#manualReasonInput"),
   manualExitButton: $("#manualExitButton"),
   manualMessage: $("#manualMessage"),
+  manualCodeButton: $("#manualCodeButton"),
+  manualCodeShown: $("#manualCodeShown"),
+  manualCodeInput: $("#manualCodeInput"),
+  manualLocationButton: $("#manualLocationButton"),
+  manualLocationStatus: $("#manualLocationStatus"),
+  manualCameraButton: $("#manualCameraButton"),
+  manualCameraBox: $("#manualCameraBox"),
+  manualCameraVideo: $("#manualCameraVideo"),
+  manualCaptureButton: $("#manualCaptureButton"),
+  manualCameraCancelButton: $("#manualCameraCancelButton"),
+  manualPhotoPreview: $("#manualPhotoPreview"),
+  manualPhotoImg: $("#manualPhotoImg"),
+  manualPhotoRetakeButton: $("#manualPhotoRetakeButton"),
   sonarAdminForm: $("#sonarAdminForm"),
   sonarDriverSearchInput: $("#sonarDriverSearchInput"),
   loadSonarDriversButton: $("#loadSonarDriversButton"),
@@ -258,7 +321,56 @@ const elements = {
   enrollPreviewImage: $("#enrollPreviewImage"),
   enrollCameraButton: $("#enrollCameraButton"),
   deleteEnrollButton: $("#deleteEnrollButton"),
-  enrollMessage: $("#enrollMessage")
+  enrollMessage: $("#enrollMessage"),
+  journalStatus: $("#journalStatus"),
+  journalDateFromInput: $("#journalDateFromInput"),
+  journalDateToInput: $("#journalDateToInput"),
+  journalSearchInput: $("#journalSearchInput"),
+  journalCargoFilter: $("#journalCargoFilter"),
+  reloadJournalButton: $("#reloadJournalButton"),
+  exportJournalButton: $("#exportJournalButton"),
+  journalBody: $("#journalBody"),
+  journalPrevPageButton: $("#journalPrevPageButton"),
+  journalPageLabel: $("#journalPageLabel"),
+  journalNextPageButton: $("#journalNextPageButton"),
+  rechazoStatus: $("#rechazoStatus"),
+  rechazoDateFromInput: $("#rechazoDateFromInput"),
+  rechazoDateToInput: $("#rechazoDateToInput"),
+  rechazoSearchInput: $("#rechazoSearchInput"),
+  reloadRechazoButton: $("#reloadRechazoButton"),
+  exportRechazoButton: $("#exportRechazoButton"),
+  resendAllRechazoButton: $("#resendAllRechazoButton"),
+  rechazoBody: $("#rechazoBody"),
+  rechazoPrevPageButton: $("#rechazoPrevPageButton"),
+  rechazoPageLabel: $("#rechazoPageLabel"),
+  rechazoNextPageButton: $("#rechazoNextPageButton"),
+  inconsistStatus: $("#inconsistStatus"),
+  inconsistDateFromInput: $("#inconsistDateFromInput"),
+  inconsistDateToInput: $("#inconsistDateToInput"),
+  inconsistSearchInput: $("#inconsistSearchInput"),
+  reloadInconsistButton: $("#reloadInconsistButton"),
+  exportInconsistButton: $("#exportInconsistButton"),
+  inconsistBody: $("#inconsistBody"),
+  inconsistMessage: $("#inconsistMessage"),
+  sinMarcaStatus: $("#sinMarcaStatus"),
+  sinMarcaDaysInput: $("#sinMarcaDaysInput"),
+  sinMarcaMaxBioInput: $("#sinMarcaMaxBioInput"),
+  sinMarcaSearchInput: $("#sinMarcaSearchInput"),
+  reloadSinMarcaButton: $("#reloadSinMarcaButton"),
+  exportSinMarcaButton: $("#exportSinMarcaButton"),
+  sinMarcaBody: $("#sinMarcaBody"),
+  sinMarcaMessage: $("#sinMarcaMessage"),
+  validacionStatus: $("#validacionStatus"),
+  validacionDateFromInput: $("#validacionDateFromInput"),
+  validacionDateToInput: $("#validacionDateToInput"),
+  validacionMaxHorasInput: $("#validacionMaxHorasInput"),
+  validacionSearchInput: $("#validacionSearchInput"),
+  validacionFiltroTipo: $("#validacionFiltroTipo"),
+  reloadValidacionButton: $("#reloadValidacionButton"),
+  exportValidacionButton: $("#exportValidacionButton"),
+  validacionResumen: $("#validacionResumen"),
+  validacionBody: $("#validacionBody"),
+  validacionMessage: $("#validacionMessage")
 };
 
 function setMessage(target, text, type = "") {
@@ -291,6 +403,28 @@ function hideAlertModal() {
   elements.alertOverlay.classList.add("hidden");
 }
 
+function showRegistroModal({ titulo, subtitulo = "", ok = true, filas = [] }) {
+  if (!elements.registroSuccessOverlay) return;
+  elements.registroSuccessTitle.textContent = titulo;
+  elements.registroSuccessSubtitle.textContent = subtitulo;
+  elements.registroSuccessSubtitle.classList.toggle("hidden", !subtitulo);
+  elements.registroSuccessModal?.classList.toggle("is-pending", !ok);
+  elements.registroSuccessBody.innerHTML = filas
+    .filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== "")
+    .map(([label, value, esError]) => `
+      <div class="registro-success-row ${esError ? "is-error" : ""}">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(String(value))}</strong>
+      </div>
+    `).join("");
+  elements.registroSuccessOverlay.classList.remove("hidden");
+  renderIcons();
+}
+
+function hideRegistroModal() {
+  elements.registroSuccessOverlay?.classList.add("hidden");
+}
+
 function isMobilePhotoOnlyMode() {
   return state.cameraMode === "attendance"
     && !requiresBiometric()
@@ -318,6 +452,7 @@ function showBukResult(value) {
 }
 
 function setWorkflowState(stage) {
+  state.workflowStage = stage;
   [elements.stepDni, elements.stepPhoto, elements.stepRegister].forEach((step) => {
     step.classList.remove("active", "done");
   });
@@ -340,14 +475,15 @@ function setWorkflowState(stage) {
       elements.submitButton.scrollIntoView({ behavior: "smooth", block: "center" });
       try { elements.submitButton.focus({ preventScroll: true }); } catch (_) {}
     }, 220);
-    if (state.isDriverCandidate && !state.currentLocation) {
+    if (!state.currentLocation) {
       setTimeout(() => { captureCurrentLocation(); }, 350);
     }
   }
 
+  const faltaUbicacion = stage === "register" && !state.currentLocation;
   elements.cameraButton.disabled = stage === "dni";
-  elements.submitButton.disabled = stage !== "register";
-  elements.submitButton.classList.toggle("attention", stage === "register");
+  elements.submitButton.disabled = stage !== "register" || faltaUbicacion;
+  elements.submitButton.classList.toggle("attention", stage === "register" && !faltaUbicacion);
   elements.markControls.classList.toggle("hidden", stage === "dni");
   renderSentidoSelector();
   renderJornadaHint();
@@ -357,8 +493,21 @@ function setWorkflowState(stage) {
   } else if (stage === "photo") {
     setNextActionNotice("Paso pendiente: abre la camara y toma una foto del colaborador.");
   } else if (stage === "register") {
-    setNextActionNotice("Ultimo paso: toca el boton verde Registrar asistencia para guardar la marca.");
+    setNextActionNotice(faltaUbicacion
+      ? "Falta la UBICACIÓN para registrar. Toca 'Activar ubicación' y permite el acceso."
+      : "Ultimo paso: toca el boton verde Registrar asistencia para guardar la marca.");
   }
+}
+
+// Habilita/deshabilita el boton Registrar segun haya ubicacion (obligatoria).
+function syncSubmitLockPorUbicacion() {
+  if (state.workflowStage !== "register" || !elements.submitButton) return;
+  const faltaUbicacion = !state.currentLocation;
+  elements.submitButton.disabled = faltaUbicacion;
+  elements.submitButton.classList.toggle("attention", !faltaUbicacion);
+  setNextActionNotice(faltaUbicacion
+    ? "Falta la UBICACIÓN para registrar. Toca 'Activar ubicación' y permite el acceso."
+    : "Ultimo paso: toca el boton verde Registrar asistencia para guardar la marca.");
 }
 
 async function rollbackAttendanceFailure({ asistenciaId, photoPath, dni, bukData }) {
@@ -404,11 +553,15 @@ function resetCaptureState(clearHistory = true) {
   state.currentLocation = null;
   state.isDriverCandidate = false;
   state.attendanceSonarDriver = null;
+  state.openEntrada = null;
   configureDriverFields(null);
   elements.previewBox.classList.add("hidden");
   elements.photoPreview.removeAttribute("src");
+  elements.locationSection?.classList.add("hidden");
+  if (elements.locationStatus) elements.locationStatus.textContent = "Pendiente por validar coordenadas.";
   setNextActionNotice("");
   setWorkflowState("dni");
+  renderTurnoStatusBanner();
   clearBukResult();
   if (clearHistory) clearHistoryPanel();
 }
@@ -549,12 +702,53 @@ async function init() {
   }
 
   supabaseClient.auth.onAuthStateChange((_event, session) => {
-    if (session?.user) {
+    const nuevoUserId = session?.user?.id || null;
+    const actualUserId = state.user?.id || null;
+
+    if (!nuevoUserId) {
+      // Cierre de sesion.
+      if (actualUserId) showLogin();
+      return;
+    }
+
+    // Solo (re)inicializa la app si es un usuario DISTINTO al ya cargado.
+    // Evita que TOKEN_REFRESHED / SIGNED_IN repetidos (refresco de token, al
+    // enfocar la pestana) reinicien la app y borren lo que se esta viendo.
+    if (nuevoUserId !== actualUserId) {
       showApp(session.user);
-    } else {
-      showLogin();
     }
   });
+
+  setupEmbeddedAutoLogin();
+}
+
+// Auto-login cuando la app va embebida en un iframe (ej. portal de enturnamiento).
+// El padre envia { type: "BIOMETRICO_SESSION", payload: { access_token, refresh_token }}
+// por postMessage; aqui aplicamos esa sesion con setSession (funciona aunque el
+// almacenamiento este bloqueado). Al terminar, avisamos al padre con OK/FAIL, y al
+// arrancar le mandamos BIOMETRICO_READY para que nos reenvie la sesion.
+function setupEmbeddedAutoLogin() {
+  if (window.parent === window) return; // no estamos embebidos
+
+  window.addEventListener("message", async (event) => {
+    const data = event.data;
+    if (!data || typeof data !== "object" || data.type !== "BIOMETRICO_SESSION") return;
+    const p = data.payload || {};
+    if (!p.access_token || !p.refresh_token) return;
+    try {
+      const { error } = await supabaseClient.auth.setSession({
+        access_token: p.access_token,
+        refresh_token: p.refresh_token
+      });
+      if (error) throw error;
+      event.source?.postMessage({ type: "BIOMETRICO_SESSION_OK", email: p.user_email || "" }, event.origin);
+    } catch (e) {
+      event.source?.postMessage({ type: "BIOMETRICO_SESSION_FAIL", error: e?.message || String(e) }, event.origin);
+    }
+  });
+
+  // Avisar al padre que ya estamos listos para recibir la sesion.
+  try { window.parent.postMessage({ type: "BIOMETRICO_READY" }, "*"); } catch (_) {}
 }
 
 function showLogin() {
@@ -600,7 +794,31 @@ async function login(event) {
 }
 
 async function logout() {
+  state.adminUnlocked = false;
+  try { sessionStorage.removeItem("admin_unlocked"); } catch (_) {}
   await supabaseClient.auth.signOut();
+}
+
+// Las pestañas de administrador (Administración, Base colaboradores, Salida
+// incapacidad) NO se muestran en modo movil, aunque el usuario sea admin.
+// El movil es solo para registrar rapido.
+function applyTabVisibility() {
+  if (!elements.adminTabButton) return;
+  const esMovil = state.deviceMode === "mobile";
+  const mostrarAdmin = state.isAdmin && !esMovil;
+
+  elements.adminTabButton.classList.toggle("hidden", !mostrarAdmin);
+  elements.databaseTabButton.classList.toggle("hidden", !mostrarAdmin);
+  elements.manualExitTabButton?.classList.toggle("hidden", !mostrarAdmin);
+
+  // Si el usuario esta en una pestaña de admin que ya no debe verse, volver a Registro.
+  if (!mostrarAdmin && state.user) {
+    const enPanelAdmin =
+      !elements.adminPanel.classList.contains("hidden") ||
+      !elements.databasePanel.classList.contains("hidden") ||
+      (elements.manualExitPanel && !elements.manualExitPanel.classList.contains("hidden"));
+    if (enPanelAdmin) showTab("register");
+  }
 }
 
 async function loadProfile() {
@@ -611,8 +829,7 @@ async function loadProfile() {
     .maybeSingle();
 
   state.isAdmin = Boolean(data?.activo && data?.rol === "admin");
-  elements.adminTabButton.classList.toggle("hidden", !state.isAdmin);
-  elements.databaseTabButton.classList.toggle("hidden", !state.isAdmin);
+  applyTabVisibility();
   configureReportTimeControls();
 
   if (state.isAdmin) {
@@ -637,7 +854,7 @@ function updateOverdueBadge(count) {
 }
 
 function showAdminSubtab(name) {
-  const valid = ["alerts", "abiertos", "marcas", "rostros", "sonar"];
+  const valid = ["alerts", "abiertos", "marcas", "jornadas", "rechazos", "inconsistencias", "validacion", "sinmarca", "rostros", "sonar"];
   const target = valid.includes(name) ? name : "alerts";
   document.querySelectorAll("[data-admin-tab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.adminTab === target);
@@ -647,24 +864,216 @@ function showAdminSubtab(name) {
     node.classList.toggle("hidden", node.dataset.adminContent !== target);
   });
   state.adminSubtab = target;
+
+  if (target === "jornadas") {
+    setupJournalDefaults();
+    if (!state.journalLoaded) loadJournalMarks();
+  }
+
+  if (target === "rechazos") {
+    setupRechazoDefaults();
+    if (!state.rechazoLoaded) loadRechazoMarks();
+  }
+
+  if (target === "inconsistencias") {
+    setupInconsistDefaults();
+    if (!state.inconsistLoaded) loadInconsistMarks();
+  }
+
+  if (target === "sinmarca") {
+    if (!state.sinMarcaLoaded) loadSinMarca();
+  }
+
+  if (target === "validacion") {
+    setupValidacionDefaults();
+    if (!state.validacionLoaded) loadValidacionTurnos();
+  }
+}
+
+// ---- Tutorial "¿Cómo marcar?" (modal con pasos ilustrados) ----
+const TUTORIAL_STORAGE_KEY = "tutorial_marca_visto";
+const TUTORIAL_STEPS = [
+  {
+    icon: "search",
+    titulo: "Valida la cédula",
+    texto: "Digita la cédula del colaborador y toca “Validar”. La app confirma que esté activo antes de continuar."
+  },
+  {
+    icon: "camera",
+    titulo: "Toma la foto",
+    texto: "Toca “Abrir cámara” y captura una foto clara del rostro. La foto es obligatoria como evidencia de la marca."
+  },
+  {
+    icon: "map-pin",
+    titulo: "Activa la ubicación",
+    texto: "La ubicación es obligatoria. Se activa sola; si no aparece, toca la caja del mapa o el botón “Activar ubicación” y permite el acceso al GPS."
+  },
+  {
+    icon: "log-in",
+    titulo: "Revisa el tipo de marca",
+    texto: "Entrada o Salida se define automáticamente según la última marca. No es editable, así se evitan errores."
+  },
+  {
+    icon: "message-circle",
+    titulo: "Registra (y comprobante opcional)",
+    texto: "Si el conductor quiere el comprobante por WhatsApp, digita su celular. Luego toca el botón verde “Registrar asistencia”. ¡Listo!"
+  }
+];
+
+function renderTutorialStep() {
+  const total = TUTORIAL_STEPS.length;
+  const i = Math.min(Math.max(state.tutorialStep || 0, 0), total - 1);
+  const step = TUTORIAL_STEPS[i];
+
+  elements.tutorialIcon.innerHTML = `<i data-lucide="${step.icon}"></i>`;
+  elements.tutorialStepNum.textContent = `Paso ${i + 1} de ${total}`;
+  elements.tutorialTitle.textContent = step.titulo;
+  elements.tutorialText.textContent = step.texto;
+
+  elements.tutorialDots.innerHTML = TUTORIAL_STEPS
+    .map((_, idx) => `<span class="${idx === i ? "active" : ""}"></span>`)
+    .join("");
+
+  elements.tutorialPrev.disabled = i === 0;
+  elements.tutorialNext.textContent = i === total - 1 ? "Entendido" : "Siguiente";
+
+  if (window.lucide?.createIcons) {
+    try { window.lucide.createIcons(); } catch (_) {}
+  }
+}
+
+function openTutorial() {
+  state.tutorialStep = 0;
+  elements.tutorialOverlay.classList.remove("hidden");
+  renderTutorialStep();
+}
+
+function closeTutorial() {
+  elements.tutorialOverlay.classList.add("hidden");
+  state.tutorialSeenSession = true; // respaldo en memoria si el storage está bloqueado
+  try { localStorage.setItem(TUTORIAL_STORAGE_KEY, "1"); } catch (_) {}
+}
+
+function tutorialNext() {
+  if (state.tutorialStep >= TUTORIAL_STEPS.length - 1) {
+    closeTutorial();
+    return;
+  }
+  state.tutorialStep += 1;
+  renderTutorialStep();
+}
+
+function tutorialPrev() {
+  if (state.tutorialStep <= 0) return;
+  state.tutorialStep -= 1;
+  renderTutorialStep();
+}
+
+// Se muestra automáticamente la primera vez que el usuario ve el registro.
+function maybeShowTutorial() {
+  if (state.tutorialSeenSession) return;
+  if (elements.tutorialOverlay && !elements.tutorialOverlay.classList.contains("hidden")) return;
+  let visto = false;
+  try { visto = localStorage.getItem(TUTORIAL_STORAGE_KEY) === "1"; } catch (_) {}
+  if (!visto) openTutorial();
+}
+
+// ---- Clave del panel de Administración (verificada en el servidor) ----
+// Usa una bandera EN MEMORIA como fuente principal (state.adminUnlocked) y el
+// sessionStorage solo como respaldo. Así funciona aunque el contenedor (WebView /
+// iframe) bloquee el almacenamiento ("Tracking Prevention blocked storage").
+function isAdminUnlocked() {
+  if (state.adminUnlocked) return true;
+  try {
+    if (sessionStorage.getItem("admin_unlocked") === "1") {
+      state.adminUnlocked = true;
+      return true;
+    }
+  } catch (_) { /* storage bloqueado: nos quedamos con la bandera en memoria */ }
+  return false;
+}
+
+// Pide la clave y la valida contra el servidor (RPC verificar_clave_admin, que la
+// compara con la guardada en Vault). Devuelve una promesa que resuelve true/false.
+function requireAdminClave() {
+  if (isAdminUnlocked()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    elements.adminClaveInput.value = "";
+    elements.adminClaveError.classList.add("hidden");
+    elements.adminClaveOverlay.classList.remove("hidden");
+    setTimeout(() => elements.adminClaveInput.focus(), 60);
+
+    const cleanup = () => {
+      elements.adminClaveOverlay.classList.add("hidden");
+      elements.adminClaveAccept.removeEventListener("click", onAccept);
+      elements.adminClaveCancel.removeEventListener("click", onCancel);
+      elements.adminClaveInput.removeEventListener("keydown", onKey);
+    };
+    const onAccept = async () => {
+      const clave = elements.adminClaveInput.value;
+      if (!clave) return;
+      elements.adminClaveAccept.disabled = true;
+      const { data, error } = await supabaseClient.rpc("verificar_clave_admin", { p_clave: clave });
+      elements.adminClaveAccept.disabled = false;
+      if (!error && data === true) {
+        state.adminUnlocked = true;
+        try { sessionStorage.setItem("admin_unlocked", "1"); } catch (_) {}
+        cleanup();
+        resolve(true);
+      } else {
+        elements.adminClaveError.classList.remove("hidden");
+        elements.adminClaveInput.value = "";
+        elements.adminClaveInput.focus();
+      }
+    };
+    const onCancel = () => { cleanup(); resolve(false); };
+    const onKey = (event) => { if (event.key === "Enter") { event.preventDefault(); onAccept(); } };
+    elements.adminClaveAccept.addEventListener("click", onAccept);
+    elements.adminClaveCancel.addEventListener("click", onCancel);
+    elements.adminClaveInput.addEventListener("keydown", onKey);
+  });
 }
 
 function showTab(tabName) {
-  if ((tabName === "database" || tabName === "admin") && !state.isAdmin) {
+  // El panel de Administración exige clave: si no está desbloqueado, no se muestra.
+  if (tabName === "admin" && !isAdminUnlocked()) {
+    tabName = "register";
+  }
+  const esTabAdmin = tabName === "database" || tabName === "admin" || tabName === "manualexit";
+  // Las pestañas de admin no estan disponibles si no es admin, o si esta en movil.
+  if (esTabAdmin && (!state.isAdmin || state.deviceMode === "mobile")) {
     tabName = "register";
   }
 
   const isHistory = tabName === "history";
   const isDatabase = tabName === "database";
   const isAdmin = tabName === "admin";
-  elements.registerPanel.classList.toggle("hidden", isHistory || isDatabase || isAdmin);
+  const isManualExit = tabName === "manualexit";
+  elements.registerPanel.classList.toggle("hidden", isHistory || isDatabase || isAdmin || isManualExit);
   elements.historyPanel.classList.toggle("hidden", !isHistory);
   elements.databasePanel.classList.toggle("hidden", !isDatabase);
   elements.adminPanel.classList.toggle("hidden", !isAdmin);
-  elements.registerTabButton.classList.toggle("active", !isHistory && !isDatabase && !isAdmin);
+  elements.manualExitPanel?.classList.toggle("hidden", !isManualExit);
+  elements.registerTabButton.classList.toggle("active", !isHistory && !isDatabase && !isAdmin && !isManualExit);
   elements.historyTabButton.classList.toggle("active", isHistory);
   elements.databaseTabButton.classList.toggle("active", isDatabase);
   elements.adminTabButton.classList.toggle("active", isAdmin);
+  elements.manualExitTabButton?.classList.toggle("active", isManualExit);
+
+  if (isManualExit) {
+    syncServerClock().then(setupManualDefaults);
+    manualAutoLocation();
+  }
+
+  if (isHistory) {
+    setupHistoryDefaults();
+    // Al entrar, si no hay cedula, mostramos los ultimos 20 registros (solo admin,
+    // para no exponer datos de todos a un usuario no administrador).
+    if (!normalizeDni(elements.historyDniInput.value)) {
+      if (state.isAdmin) loadRecentHistory();
+      else clearHistoryPanel();
+    }
+  }
 
   if (isDatabase && !state.csvLoaded) {
     loadCollaboratorsCsv();
@@ -677,6 +1086,9 @@ function showTab(tabName) {
     loadAdminMarks();
     loadOpenTurns();
   }
+
+  const isRegister = !isHistory && !isDatabase && !isAdmin && !isManualExit;
+  if (isRegister) maybeShowTutorial();
 }
 
 function normalizeDni(value) {
@@ -774,6 +1186,13 @@ function findVehicleFromInput(value) {
   const clean = String(value || "").trim().toUpperCase();
   if (!clean) return null;
   const normalizedSearch = clean.replace(/[^\dA-Z]/g, "");
+  // Coincidencia por token con limites, para que un interno corto (ej. "1")
+  // no se confunda dentro de "100" o de una placa como "ABC123".
+  const contieneToken = (token) => {
+    if (!token) return false;
+    const t = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^\\dA-Z])${t}([^\\dA-Z]|$)`).test(clean);
+  };
   return state.vehicles.find((v) => {
     const interno = (v.interno || "").toUpperCase();
     const placa = (v.placa || "").toUpperCase();
@@ -783,8 +1202,8 @@ function findVehicleFromInput(value) {
       || placa === clean
       || internoNorm === normalizedSearch
       || placaNorm === normalizedSearch
-      || clean.includes(interno) && interno.length > 0
-      || clean.includes(placa) && placa.length > 0;
+      || contieneToken(interno)
+      || contieneToken(placa);
   }) || null;
 }
 
@@ -947,6 +1366,7 @@ async function buscarColaborador() {
   await loadLastEntradaForDni(dni);
   computeOpenEntrada();
   state.nextSentido = state.openEntrada ? "salida" : "entrada";
+  renderSentidoSelector();
   const faceStatus = state.isDriverCandidate
     ? (data?.rostro_enrolado ? "Conductor con rostro enrolado: se intentara validacion biometrica." : "Conductor sin rostro enrolado: se intentara detectar rostro.")
     : "Foto obligatoria como evidencia. Biometria no requerida para este cargo.";
@@ -969,12 +1389,17 @@ async function buscarColaborador() {
     ${openInfo ? `<div>${escapeHtml(openInfo)}</div>` : ""}
   `;
   setWorkflowState("photo");
+  renderTurnoStatusBanner();
+  elements.locationSection?.classList.remove("hidden");
+  captureCurrentLocation();
   setMessage(elements.formMessage, state.isDriverCandidate
     ? "Cedula activa. Ubica el rostro dentro del recuadro para la validacion biometrica."
     : "Cedula activa. Toma la foto de evidencia para continuar.", "success");
 
   if (openInfo) {
-    openPendingExitModal();
+    // Turno abierto: se cierra marcando la SALIDA biometrica aqui en el punto.
+    setSentido("salida");
+    setMessage(elements.formMessage, "Este colaborador tiene un turno abierto. Toma la foto y registra su SALIDA biometrica para cerrarlo.", "success");
   } else if (state.nextSentido === "entrada" && state.lastAttendance?.sentido === "salida") {
     const last = state.lastAttendance;
     const today = getTodayParts().date;
@@ -1040,9 +1465,9 @@ async function startCamera() {
       elements.captureButton.disabled = false;
       elements.faceGuide.classList.add("ready");
       elements.liveFaceStatus.textContent = "Toma una foto frontal como evidencia. La validacion biometrica solo aplica para conductores.";
-      setMessage(elements.formMessage, "Foto de evidencia obligatoria. Biometria solo para conductores.", "success");
+      setMessage(messageTarget, "Foto de evidencia obligatoria. Biometria solo para conductores.", "success");
     } else {
-      setMessage(elements.formMessage, "Ubica el rostro dentro del recuadro y captura.", "");
+      setMessage(messageTarget, "Ubica el rostro dentro del recuadro y captura.", "");
       scheduleAttendanceFaceFallback();
       initFaceDetector().then((ready) => {
         if (ready) {
@@ -1053,7 +1478,7 @@ async function startCamera() {
       });
     }
   } catch (_error) {
-    setMessage(elements.formMessage, "No se pudo abrir la camara.", "error");
+    setMessage(messageTarget, "No se pudo abrir la camara.", "error");
   }
 }
 
@@ -1163,6 +1588,13 @@ async function capturePhoto() {
     return;
   }
 
+  // Aprovechamos el gesto del boton "Tomar foto" (obligatorio en movil para el
+  // permiso de GPS) para capturar la ubicacion automaticamente, sin que el
+  // usuario tenga que tocar "Activar ubicacion". Corre en paralelo.
+  if (state.cameraMode === "attendance" && !state.currentLocation) {
+    captureCurrentLocation();
+  }
+
   const canvas = document.createElement("canvas");
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
@@ -1184,7 +1616,11 @@ async function capturePhoto() {
 
 async function prepareImageFile(file) {
   setMessage(elements.formMessage, isEvidenceOnlyMode() ? "Preparando foto de evidencia..." : "Comprimiendo y validando rostro...");
-  const compressed = await compressImage(file, 720, 0.72);
+  // En movil la foto se comprime MAS fuerte (menos peso = subida rapida y menos datos).
+  const esMovilCaptura = state.deviceMode === "mobile";
+  const compressed = esMovilCaptura
+    ? await compressImage(file, 512, 0.55, 130000)
+    : await compressImage(file, 720, 0.72);
   const previewUrl = URL.createObjectURL(compressed);
   const evidenceOnly = isEvidenceOnlyMode();
   const faceCheck = evidenceOnly
@@ -1452,7 +1888,7 @@ function loadImageFromUrl(url) {
   });
 }
 
-async function compressImage(file, maxSize, quality) {
+async function compressImage(file, maxSize, quality, maxBytes = 650000) {
   const image = await loadImage(file);
   const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
   const canvas = document.createElement("canvas");
@@ -1463,7 +1899,7 @@ async function compressImage(file, maxSize, quality) {
   let currentQuality = quality;
   let blob = await canvasToBlob(canvas, currentQuality);
 
-  while (blob.size > 650000 && currentQuality > 0.42) {
+  while (blob.size > maxBytes && currentQuality > 0.38) {
     currentQuality -= 0.08;
     blob = await canvasToBlob(canvas, currentQuality);
   }
@@ -1489,13 +1925,30 @@ function getTodayParts() {
 }
 
 function getTodayPartsFromDate(now) {
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const hour = String(now.getHours()).padStart(2, "0");
-  const minute = String(now.getMinutes()).padStart(2, "0");
-  const second = String(now.getSeconds()).padStart(2, "0");
-  return { year, month, day, date: `${year}-${month}-${day}`, time: `${hour}:${minute}:${second}` };
+  // Extrae fecha/hora SIEMPRE en horario de Colombia (America/Bogota), sin importar
+  // la zona horaria del dispositivo. Antes usaba getHours()/getDate() (hora LOCAL
+  // del equipo): en un equipo con la zona en UTC, la hora salía corrida ~5h hacia
+  // adelante y Buk rechazaba la marca como "fecha futura".
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+  const p = {};
+  for (const part of fmt.formatToParts(now)) p[part.type] = part.value;
+  const hour = p.hour === "24" ? "00" : p.hour; // algunos motores dan "24" a medianoche
+  return {
+    year: p.year,
+    month: p.month,
+    day: p.day,
+    date: `${p.year}-${p.month}-${p.day}`,
+    time: `${hour}:${p.minute}:${p.second}`
+  };
 }
 
 function setupManualDefaults() {
@@ -1545,6 +1998,13 @@ function renderLocationMap(latitud, longitud, precision) {
   elements.locationMap.classList.remove("is-loading");
   elements.locationMap.classList.add("is-visible");
 
+  // Si el contenedor aun no tiene tamaño (panel oculto / sin layout), Leaflet se
+  // cae al calcular offsetWidth. Reintentamos cuando el div ya tenga dimensiones.
+  if (!state.locationMap && !elements.locationMap.offsetWidth) {
+    setTimeout(() => renderLocationMap(latitud, longitud, precision), 200);
+    return;
+  }
+
   if (!state.locationMap) {
     state.locationMap = window.L.map(elements.locationMap, {
       zoomControl: true,
@@ -1579,12 +2039,48 @@ function renderLocationMap(latitud, longitud, precision) {
   setTimeout(() => state.locationMap?.invalidateSize(), 120);
 }
 
+async function estadoPermisoUbicacion() {
+  try {
+    if (navigator.permissions?.query) {
+      const status = await navigator.permissions.query({ name: "geolocation" });
+      return status.state; // 'granted' | 'prompt' | 'denied'
+    }
+  } catch (_) { /* algunos navegadores no soportan Permissions API */ }
+  return "unknown";
+}
+
+function mostrarInstruccionesUbicacionDenegada() {
+  elements.locationSection?.classList.remove("hidden");
+  showLocationPermissionHelp(true);
+  elements.locationButton.textContent = "Reintentar ubicación";
+  showAlertModal(
+    "Debes habilitar la ubicación",
+    "La ubicación es OBLIGATORIA y está bloqueada en este navegador. Toca el candado (o la 'i') que está junto a la dirección web, entra en Ubicación y elige Permitir. En el celular revisa también que el GPS esté encendido. Luego toca 'Activar ubicación'. Sin ubicación no se puede registrar."
+  );
+}
+
 async function captureCurrentLocation() {
   if (!requireOnline()) return null;
+
+  // Verifica el permiso antes de intentar: si esta bloqueado, guia para habilitarlo.
+  const permiso = await estadoPermisoUbicacion();
+  if (permiso === "denied") {
+    state.currentLocation = null;
+    elements.locationStatus.textContent = "Ubicación BLOQUEADA en el navegador. Debes habilitarla para registrar.";
+    elements.locationMap?.classList.remove("is-loading", "is-visible");
+    if (elements.locationMap) elements.locationMap.textContent = "";
+    mostrarInstruccionesUbicacionDenegada();
+    syncSubmitLockPorUbicacion();
+    return null;
+  }
+
   elements.locationStatus.textContent = "Pidiendo permiso y validando coordenadas...";
   elements.locationButton.disabled = true;
   elements.locationMap?.classList.add("is-loading", "is-visible");
-  elements.locationMap.textContent = "Cargando mapa...";
+  // No sobreescribir el contenido si Leaflet ya creo el mapa dentro del div: al
+  // hacer textContent="" se destruye el DOM interno de Leaflet pero quedan vivos
+  // sus manejadores de arrastre, y al tocar el mapa se cae con "offsetWidth null".
+  if (elements.locationMap && !state.locationMap) elements.locationMap.textContent = "Cargando mapa...";
   showLocationPermissionHelp(false);
 
   const location = await getLocation();
@@ -1594,27 +2090,24 @@ async function captureCurrentLocation() {
     state.currentLocation = null;
     elements.locationMap?.classList.remove("is-loading");
     elements.locationMap?.classList.remove("is-visible");
-    elements.locationMap.textContent = "";
+    if (elements.locationMap && !state.locationMap) elements.locationMap.textContent = "";
 
     if (location.error === "denied" || location.error === "unsupported") {
       elements.locationStatus.textContent = `${location.message} Sigue los pasos para habilitarlo.`;
-      showLocationPermissionHelp(true);
-      elements.locationButton.textContent = "Reintentar ubicación";
+      mostrarInstruccionesUbicacionDenegada();
     } else {
       elements.locationStatus.textContent = location.message || "No se pudo obtener la ubicacion. Toca 'Activar ubicacion' para reintentar.";
     }
+    syncSubmitLockPorUbicacion();
     return null;
   }
 
   const point = findNearestOperationalPoint(location);
   state.currentLocation = { ...location, punto_operativo: point?.name || "" };
-  const baseLabel = formatLocationStatus(state.currentLocation, point);
-  const esMovil = state.deviceMode === "mobile";
-  elements.locationStatus.textContent = esMovil
-    ? `${baseLabel} (validada en el dispositivo, no se almacena)`
-    : baseLabel;
-  elements.locationMap.textContent = "";
+  elements.locationStatus.textContent = formatLocationStatus(state.currentLocation, point);
+  if (elements.locationMap && !state.locationMap) elements.locationMap.textContent = "";
   renderLocationMap(location.latitud, location.longitud, location.precision);
+  syncSubmitLockPorUbicacion();
   return state.currentLocation;
 }
 
@@ -1659,6 +2152,35 @@ function formatLocationStatus(location, point) {
   return `${coords} ${precision} Punto mas cercano: ${point.name} a ${distance} m (${inside ? "dentro" : "fuera"} del radio).`;
 }
 
+const DUPLICADO_MINUTOS = 30;
+
+// Devuelve la marca previa del MISMO sentido si esta a menos de 30 min (posible doble marca).
+async function marcaDuplicadaReciente(colaboradorId, sentido, fecha, hora) {
+  if (!colaboradorId) return null;
+  const { data, error } = await supabaseClient
+    .from("asistencias")
+    .select("id,fecha,hora,sentido")
+    .eq("colaborador_id", colaboradorId)
+    .eq("sentido", sentido)
+    .order("fecha", { ascending: false })
+    .order("hora", { ascending: false })
+    .limit(1);
+
+  if (error || !data?.length) return null;
+
+  const ultima = data[0];
+  const horaAct = String(hora).length === 5 ? `${hora}:00` : String(hora).slice(0, 8);
+  const tsUltima = new Date(`${ultima.fecha}T${String(ultima.hora).slice(0, 8)}`).getTime();
+  const tsActual = new Date(`${fecha}T${horaAct}`).getTime();
+  if (Number.isNaN(tsUltima) || Number.isNaN(tsActual)) return null;
+
+  const diffMin = Math.abs(tsActual - tsUltima) / 60000;
+  if (diffMin < DUPLICADO_MINUTOS) {
+    return { ...ultima, diffMin: Math.round(diffMin) };
+  }
+  return null;
+}
+
 async function submitAttendance(event) {
   event.preventDefault();
   if (state.submittingMark) {
@@ -1681,6 +2203,23 @@ async function submitAttendance(event) {
     setMessage(elements.formMessage, "Primero toma la foto de evidencia.", "error");
     setWorkflowState("photo");
     return;
+  }
+
+  // Recordatorio: si NO digitaron el celular, confirmar que la marca se guardará
+  // SIN enviar comprobante por WhatsApp (por si el conductor sí lo quería).
+  const celularComprobante = elements.celularComprobanteInput?.value.trim() || "";
+  if (!celularComprobante) {
+    const continuar = await confirmGraphical(
+      "¿Enviar comprobante por WhatsApp?",
+      "No digitaste un número de celular, así que esta marca se guardará SIN enviar comprobante por WhatsApp. ¿Deseas continuar así o prefieres agregar el número?",
+      "Registrar sin comprobante",
+      "Agregar número"
+    );
+    if (!continuar) {
+      elements.celularComprobanteInput?.focus();
+      elements.celularComprobanteInput?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
   }
 
   if (!state.colaborador) {
@@ -1710,20 +2249,32 @@ async function submitAttendance(event) {
       setMessage(elements.formMessage, "No se pudo preparar el driverId de Sonar para este conductor.", "error");
       return;
     }
+  }
 
-    if (!state.currentLocation) {
-      const location = await captureCurrentLocation();
-      if (!location) {
-        setMessage(elements.formMessage, "Valida la ubicacion del conductor antes de registrar.", "error");
-        return;
-      }
+  // Ubicacion OBLIGATORIA para todos (antifraude): sin coordenadas no se registra.
+  if (!state.currentLocation) {
+    elements.locationSection?.classList.remove("hidden");
+    const location = await captureCurrentLocation();
+    if (!location) {
+      setMessage(elements.formMessage, "La ubicacion es OBLIGATORIA para registrar. Activa el GPS y permite el acceso a la ubicacion, luego toca 'Activar ubicacion'.", "error");
+      elements.locationSection?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
     }
+  }
+
+  const sentidoConfirmado = await confirmarCoherenciaTurno(state.nextSentido);
+  if (!sentidoConfirmado) {
+    setMessage(elements.formMessage, "Registro cancelado. Revisa el tipo de marca (entrada o salida) segun corresponda.", "");
+    return;
   }
 
   state.submittingMark = true;
   setBusy(elements.submitButton, true);
   elements.submitButton.classList.remove("attention");
   showProcess("Registrando asistencia", "Guardando foto, marca y envio a Buk/Ctrlit...");
+
+  let bukAceptado = false;
+  let marcaGuardadaLocal = false;
 
   try {
     await syncServerClock();
@@ -1734,21 +2285,30 @@ async function submitAttendance(event) {
     }
     const colaboradorDni = state.colaborador.dni;
 
+    // Anti-duplicados: no permitir la misma marca (entrada/salida) dos veces en < 30 min.
+    const duplicada = await marcaDuplicadaReciente(state.colaborador.id, sentido, now.date, now.time);
+    if (duplicada) {
+      hideProcess();
+      setNextActionNotice("");
+      showAlertModal(
+        "Posible marca duplicada",
+        `Ya hay una ${sentido.toUpperCase()} registrada hace ${duplicada.diffMin} minuto(s) (${duplicada.fecha} ${String(duplicada.hora).slice(0, 5)}). Para evitar registros dobles no se permite otra ${sentido} en menos de ${DUPLICADO_MINUTOS} minutos.`
+      );
+      throw new Error(`No se registro: ya existe una ${sentido} hace ${duplicada.diffMin} min (evitando marca doble).`);
+    }
+
     showProcess("Validando con Buk/Ctrlit", "Verificando que Buk acepte la marca antes de guardar...");
 
     let entradaParaCierre = null;
     let jornadaBuk;
     if (sentido === "salida") {
       if (state.openEntrada) {
-        const openFecha = state.openEntrada.fecha;
-        const diaAnterior = addDays(now.date, -1);
-        if (openFecha === now.date || openFecha === diaAnterior) {
-          entradaParaCierre = state.openEntrada;
-          jornadaBuk = state.openEntrada.jornada || state.openEntrada.fecha;
-          console.log("[BUK] cerrando turno abierto", { entradaParaCierre, jornadaBuk });
-        } else {
-          throw new Error(`La entrada abierta del ${openFecha} es mas vieja que el dia anterior; Buk no aceptara esta salida. Cierra esa entrada primero.`);
-        }
+        // Se permite cerrar el turno biometricamente sin importar su antiguedad.
+        // Si Buk lo rechaza (p. ej. por exceso de horas), la marca queda guardada
+        // como pendiente en la pestana "Rechazos Buk" (no se pierde).
+        entradaParaCierre = state.openEntrada;
+        jornadaBuk = state.openEntrada.jornada || state.openEntrada.fecha;
+        console.log("[BUK] cerrando turno abierto", { entradaParaCierre, jornadaBuk });
       } else {
         throw new Error("No hay turno abierto: no se puede registrar una salida sin una entrada previa.");
       }
@@ -1820,68 +2380,73 @@ async function submitAttendance(event) {
       console.log("[BUK] respuesta entrada", { data: entradaBuk, error: entradaBukError });
       trazaBuk.push({ paso: "reenvio_entrada", payload: payloadEntrada, respuesta: entradaBuk ?? null, transportError: entradaBukError?.message ?? null });
 
-      if (entradaBukError || !entradaBuk?.ok) {
+      if (!entradaBukError && entradaBuk?.ok) {
+        showProcess("Reintentando salida en Buk", "Entrada aceptada. Enviando la salida nuevamente...");
+
+        console.log("[BUK] enviando salida (intento 2 tras entrada OK)", payloadSalida);
+        const reintento = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
+          body: payloadSalida
+        });
+        console.log("[BUK] respuesta salida (intento 2)", reintento);
+        trazaBuk.push({ paso: "salida_intento_2", payload: payloadSalida, respuesta: reintento.data ?? null, transportError: reintento.error?.message ?? null });
+        bukData = reintento.data;
+        bukError = reintento.error;
+      } else {
         const detalle = entradaBuk?.error || entradaBukError?.message || "Buk no acepto la entrada.";
-        showBukResult({ trazaBuk });
-        setNextActionNotice(`No se pudo reenviar la entrada a Buk: ${detalle}`);
-        throw new Error(`Buk rechazo la entrada al reintentar: ${detalle}`);
+        setNextActionNotice(`No se pudo reenviar la entrada a Buk: ${detalle}. La salida se guardara como pendiente.`);
       }
-
-      showProcess("Reintentando salida en Buk", "Entrada aceptada. Enviando la salida nuevamente...");
-
-      console.log("[BUK] enviando salida (intento 2 tras entrada OK)", payloadSalida);
-      const reintento = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-        body: payloadSalida
-      });
-      console.log("[BUK] respuesta salida (intento 2)", reintento);
-      trazaBuk.push({ paso: "salida_intento_2", payload: payloadSalida, respuesta: reintento.data ?? null, transportError: reintento.error?.message ?? null });
-      bukData = reintento.data;
-      bukError = reintento.error;
     }
 
     showBukResult({ resultado_final: bukData || bukError, trazaBuk });
 
-    if (bukError || !bukData?.ok) {
-      const bukErrorText = bukData?.error || bukError?.message || "Buk/Ctrlit rechazo la marca.";
-      setNextActionNotice("Buk rechazo la marca. Corrige los datos o toca de nuevo Registrar asistencia para reintentar.");
-      throw new Error(`Buk rechazo la marca: ${bukErrorText}`);
+    // Politica: la marca DEBE quedar guardada en Supabase aunque Buk la rechace.
+    // Si Buk rechaza, se guarda con enviado_buk=false y el detalle del error,
+    // para que quede registrada y aparezca en la pestana "Rechazos Buk".
+    const bukOk = !bukError && !!bukData?.ok;
+    const bukErrorText = bukOk ? "" : (mejorErrorBuk(bukData) || bukError?.message || "Buk/Ctrlit rechazo la marca.");
+    if (bukOk) {
+      bukAceptado = true;
+    } else {
+      setNextActionNotice(`Buk rechazo la marca, pero se guardara en la base como pendiente. Detalle: ${bukErrorText}`);
     }
 
     const esMovil = state.deviceMode === "mobile";
     let photoPath = null;
     let fotoEliminarEn = null;
+    let fotoWarning = "";
 
-    if (esMovil) {
-      showProcess("Registrando asistencia", "Buk acepto. Guardando marca (sin foto, modo movil para ahorrar datos)...");
-    } else {
-      showProcess("Registrando asistencia", "Buk acepto. Guardando foto y marca...");
-      photoPath = `asistencias/${now.year}/${now.month}/${now.day}/${colaboradorDni}-${sentido}-${Date.now()}.webp`;
-      fotoEliminarEn = addDays(now.date, 15);
+    // La foto se guarda SIEMPRE (incluido movil, ahora en version liviana).
+    showProcess("Registrando asistencia", esMovil ? "Subiendo foto liviana y marca..." : "Guardando foto y marca...");
+    photoPath = `asistencias/${now.year}/${now.month}/${now.day}/${colaboradorDni}-${sentido}-${Date.now()}.webp`;
+    fotoEliminarEn = addDays(now.date, 15);
 
-      const { error: uploadError } = await supabaseClient.storage
-        .from(config.FOTO_BUCKET)
-        .upload(photoPath, state.compressedFile, {
-          contentType: "image/webp",
-          upsert: false
-        });
+    const { error: uploadError } = await supabaseClient.storage
+      .from(config.FOTO_BUCKET)
+      .upload(photoPath, state.compressedFile, {
+        contentType: "image/webp",
+        upsert: false
+      });
 
-      if (uploadError) throw uploadError;
+    if (uploadError) {
+      // No abortamos: la marca debe quedar guardada aunque falle la subida de foto.
+      photoPath = null;
+      fotoEliminarEn = null;
+      fotoWarning = `Foto no se pudo subir: ${uploadError.message || "error de almacenamiento"}`;
     }
 
     const location = state.currentLocation || await getLocation();
     const userObservation = elements.observacionInput.value.trim();
     const faceObservation = state.faceWarning ? `Validacion facial con advertencia: ${state.faceWarning}` : "";
-    const mobileObservation = esMovil ? "Marca desde movil (foto y geolocalizacion validadas localmente, no almacenadas)" : "";
+    const mobileObservation = esMovil ? "Marca desde movil (foto liviana y ubicacion almacenadas)" : "";
     const selectedVehicle = getSelectedVehicle();
     const selectedVehicleLabel = getSelectedVehicleLabel();
     const driverObservation = state.isDriverCandidate
-      ? (esMovil
-        ? `Conductor: vehiculo ${selectedVehicleLabel}; base ${elements.baseInput.value.trim()}; ubicacion validada en sitio (no guardada)`
-        : `Conductor: vehiculo ${selectedVehicleLabel}; base ${elements.baseInput.value.trim()}; ubicacion ${elements.locationStatus.textContent}`)
+      ? `Conductor: vehiculo ${selectedVehicleLabel}; base ${elements.baseInput.value.trim()}; ubicacion ${elements.locationStatus.textContent}`
       : "";
     const origen = state.isAdmin
       ? "admin_form"
-      : (esMovil ? "movil_sin_foto" : "web");
+      : (esMovil ? "movil" : "web");
+    const bukObservation = bukOk ? "" : `Buk rechazo la marca: ${bukErrorText}`;
     const payload = {
       colaborador_id: state.colaborador.id,
       obra_id: state.colaborador.obra_id,
@@ -1891,19 +2456,20 @@ async function submitAttendance(event) {
       sentido,
       foto_path: photoPath,
       foto_eliminar_en: fotoEliminarEn,
-      latitud: esMovil ? null : (location.latitud || null),
-      longitud: esMovil ? null : (location.longitud || null),
+      latitud: location.latitud || null,
+      longitud: location.longitud || null,
       vehiculo_reporte: state.isDriverCandidate ? selectedVehicleLabel : null,
-      base_operativa: state.isDriverCandidate && !esMovil ? elements.baseInput.value.trim() : null,
-      punto_operativo: state.isDriverCandidate && !esMovil ? (location.punto_operativo || null) : null,
-      ubicacion_precision_m: esMovil ? null : (location.precision || null),
+      base_operativa: state.isDriverCandidate ? elements.baseInput.value.trim() : null,
+      punto_operativo: location.punto_operativo || null,
+      ubicacion_precision_m: location.precision || null,
       origen,
       registrado_por: state.user.id,
-      observacion: [userObservation, faceObservation, driverObservation, mobileObservation].filter(Boolean).join(" | ") || null,
-      enviado_buk: true,
-      buk_status: bukData.status ?? null,
-      buk_respuesta: { obra_id_usado: bukData.obra_id_usado ?? null, intentos: bukData.intentos ?? [] },
-      buk_error: null,
+      observacion: [userObservation, faceObservation, driverObservation, mobileObservation, fotoWarning, bukObservation].filter(Boolean).join(" | ") || null,
+      celular_comprobante: elements.celularComprobanteInput?.value.trim() || null,
+      enviado_buk: bukOk,
+      buk_status: bukData?.status ?? null,
+      buk_respuesta: { obra_id_usado: bukData?.obra_id_usado ?? null, intentos: bukData?.intentos ?? [], error: bukErrorText || null },
+      buk_error: bukOk ? null : bukErrorText,
       buk_enviado_at: new Date().toISOString()
     };
 
@@ -1915,12 +2481,16 @@ async function submitAttendance(event) {
 
     if (insertError) {
       if (insertError.code === "23505") {
+        // La marca ya existe en la base local: no hay inconsistencia con Buk.
+        marcaGuardadaLocal = true;
         throw new Error(
           "Ya existe una marca identica para este colaborador en la misma hora. No se duplico."
         );
       }
       throw insertError;
     }
+
+    marcaGuardadaLocal = true;
 
     let sonarData = null;
     if (state.isDriverCandidate && selectedVehicle?.m_id) {
@@ -1963,28 +2533,80 @@ async function submitAttendance(event) {
         sonarData?.conductor?.dr_id ? `dr_id ${sonarData.conductor.dr_id}` : "",
         sonarData?.vehiculo?.m_id ? `mId ${sonarData.vehiculo.m_id}` : ""
       ].filter(Boolean).join(" | ");
-      setMessage(elements.formMessage, `Asistencia guardada, pero Sonar no asigno el conductor: ${sonarDebug}`, "error");
+      const bukParte = bukOk ? "" : ` Ademas, Buk rechazo la marca (queda pendiente): ${bukErrorText}.`;
+      setMessage(elements.formMessage, `Asistencia guardada, pero Sonar no asigno el conductor: ${sonarDebug}.${bukParte}`, "error");
+    } else if (!bukOk) {
+      setMessage(
+        elements.formMessage,
+        `Marca GUARDADA en la base como pendiente. Buk/Ctrlit la rechazo: ${bukErrorText}. Queda registrada y aparece en la pestana "Rechazos Buk" para reenviar.`,
+        "error"
+      );
     } else {
       setMessage(elements.formMessage, "Asistencia registrada y enviada a Buk/Ctrlit.", "success");
-      if (sentido === "salida" && jornadaBuk !== now.date) {
-        showAlertModal(
-          "Turno nocturno cerrado",
-          `Se cerro la jornada ${jornadaBuk}. Buk recibio la salida con la fecha real ${now.date} ${now.time.slice(0, 5)}.`
-        );
-      }
     }
+
+    const nombreResumen = state.csvCandidate?.nombre || state.colaborador?.nombre || "Colaborador";
+    const cargoResumen = state.csvCandidate?.cargo || "";
+    const baseResumen = elements.baseInput.value.trim();
+    const turnoNocturno = sentido === "salida" && jornadaBuk !== now.date;
+    const filasResumen = [
+      ["Colaborador", nombreResumen],
+      ["Cedula", colaboradorDni],
+      ["Cargo", cargoResumen],
+      ["Tipo de marca", sentido === "entrada" ? "ENTRADA" : "SALIDA"],
+      ["Fecha", now.date],
+      ["Hora", now.time.slice(0, 5)],
+      ["Jornada", jornadaBuk],
+      turnoNocturno ? ["Turno nocturno", `Cerro la jornada ${jornadaBuk}`] : null,
+      state.isDriverCandidate ? ["Vehiculo", selectedVehicleLabel] : null,
+      state.isDriverCandidate ? ["Base operativa", baseResumen] : null,
+      state.isDriverCandidate && sonarData
+        ? ["Asignacion Sonar", sonarData.ok ? "Asignado" : `Fallo: ${sonarData.error || "sin detalle"}`, !sonarData.ok]
+        : null,
+      ["Foto", photoPath ? "Guardada" : "No se pudo subir", !photoPath],
+      ["Ubicacion", (location.latitud && location.longitud)
+        ? `${Number(location.latitud).toFixed(5)}, ${Number(location.longitud).toFixed(5)}`
+        : "SIN UBICACION", !(location.latitud && location.longitud)],
+      ["Estado Buk", bukOk ? "Aceptada por Buk/Ctrlit" : `Rechazada (pendiente): ${bukErrorText}`, !bukOk]
+    ].filter(Boolean);
+
+    showRegistroModal({
+      titulo: bukOk ? "Asistencia registrada" : "Marca guardada (pendiente de Buk)",
+      subtitulo: bukOk
+        ? "La marca se guardo y se envio a Buk/Ctrlit."
+        : "La marca quedo guardada. Buk/Ctrlit la rechazo y quedo pendiente de reenvio.",
+      ok: bukOk,
+      filas: filasResumen
+    });
 
     resetAttendanceForm(true);
     elements.dniInput.value = colaboradorDni;
     await loadLastAttendance(colaboradorDni);
     state.nextSentido = getNextSentidoFromLastAttendance();
   } catch (error) {
-    setMessage(elements.formMessage, error.message || "No se pudo registrar la asistencia.", "error");
-    elements.submitButton.disabled = !state.faceValidated;
+    const inconsistente = bukAceptado && !marcaGuardadaLocal;
+    if (inconsistente) {
+      // Buk ya recibio la marca pero no se pudo guardar en la base local.
+      // NO se debe reintentar a ciegas: se duplicaria la marca en Buk/nomina.
+      setNextActionNotice("");
+      setMessage(
+        elements.formMessage,
+        `IMPORTANTE: la marca YA fue enviada y aceptada por Buk/Ctrlit, pero no se pudo guardar en la base local (${error.message || "error desconocido"}). NO vuelvas a registrar la asistencia para evitar duplicarla en nomina. Avisa a administracion con la cedula y la hora para completar el registro manualmente.`,
+        "error"
+      );
+      showAlertModal(
+        "Marca enviada a Buk, pendiente en base local",
+        "La marca fue aceptada por Buk/Ctrlit pero no quedo guardada localmente. No la registres de nuevo (se duplicaria en nomina). Administracion debe completar el registro manualmente."
+      );
+    } else {
+      setMessage(elements.formMessage, error.message || "No se pudo registrar la asistencia.", "error");
+    }
+    elements.submitButton.disabled = inconsistente || !state.faceValidated;
   } finally {
     state.submittingMark = false;
     hideProcess();
-    if (state.faceValidated) {
+    // Solo re-habilitamos el reintento si Buk NO acepto la marca y hay ubicacion.
+    if (state.faceValidated && !bukAceptado && state.currentLocation) {
       elements.submitButton.disabled = false;
       elements.submitButton.classList.add("attention");
     }
@@ -2071,7 +2693,7 @@ async function loadTodayHistory() {
   const to = from + state.historyPageSize - 1;
   let query = supabaseClient
     .from("asistencias")
-    .select(dni ? "id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,colaboradores!inner(dni,nombre)" : "id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,colaboradores(dni,nombre)")
+    .select(dni ? "id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,latitud,longitud,colaboradores!inner(dni,nombre)" : "id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,latitud,longitud,colaboradores(dni,nombre)")
     .order("fecha", { ascending: false })
     .order("hora", { ascending: false })
     .range(from, to);
@@ -2114,7 +2736,18 @@ async function loadTodayHistory() {
     return;
   }
 
-  elements.historyList.innerHTML = rows.map((item) => `
+  elements.historyList.innerHTML = historyItemsHtml(rows);
+}
+
+function historyItemsHtml(rows) {
+  return rows.map((item) => {
+    const origen = item.origen || "web";
+    // Ocultamos el origen "movil_sin_foto" (no aporta al usuario).
+    const mostrarOrigen = origen !== "movil_sin_foto" && origen !== "movil";
+    const tieneCoords = item.latitud != null && item.longitud != null;
+    const lat = tieneCoords ? Number(item.latitud).toFixed(6) : "";
+    const lon = tieneCoords ? Number(item.longitud).toFixed(6) : "";
+    return `
     <article class="history-item">
       <div class="history-time">${escapeHtml(String(item.hora).slice(0, 5))}</div>
       <div class="history-main">
@@ -2125,19 +2758,61 @@ async function loadTodayHistory() {
         <div class="history-meta">
           <span>Cedula ${escapeHtml(item.colaboradores?.dni || "")}</span>
           <span>${escapeHtml(item.fecha)}</span>
-          <span>${escapeHtml(item.origen || "web")}</span>
+          ${mostrarOrigen ? `<span>${escapeHtml(origen)}</span>` : ""}
           <span>Buk ${item.enviado_buk ? "OK" : escapeHtml(item.buk_status || "pendiente")}</span>
+          ${tieneCoords ? `<a class="history-geo" href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" rel="noopener">📍 ${lat}, ${lon}</a>` : ""}
         </div>
       </div>
     </article>
-  `).join("");
+  `;
+  }).join("");
+}
+
+// Carga los ultimos 20 registros (todos los colaboradores) al entrar a "Mis registros".
+async function loadRecentHistory() {
+  if (!supabaseClient) return;
+  elements.historyList.textContent = "Cargando últimos registros...";
+  const startDate = elements.historyStartDateInput.value;
+  const endDate = elements.historyEndDateInput.value;
+
+  let query = supabaseClient
+    .from("asistencias")
+    .select("id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,latitud,longitud,colaboradores(dni,nombre)")
+    .order("fecha", { ascending: false })
+    .order("hora", { ascending: false })
+    .limit(20);
+  if (startDate) query = query.gte("fecha", startDate);
+  if (endDate) query = query.lte("fecha", endDate);
+
+  const { data, error } = await query;
+  if (error) {
+    elements.historyList.textContent = "No se pudieron cargar los registros.";
+    return;
+  }
+
+  const rows = data || [];
+  state.currentHistory = rows;
+  state.historyTotal = rows.length;
+  state.historyPage = 1;
+  elements.historySubtitle.textContent = "Últimos 20 registros (digita una cédula para filtrar)";
+  elements.historySummary.classList.add("hidden");
+  elements.historyPageLabel.textContent = "Últimos 20";
+  elements.historyPrevPageButton.disabled = true;
+  elements.historyNextPageButton.disabled = true;
+
+  elements.historyList.innerHTML = rows.length ? historyItemsHtml(rows) : "";
+  if (!rows.length) elements.historyList.textContent = "No hay registros en el rango.";
 }
 
 async function refreshCurrentHistory() {
   const dni = normalizeDni(elements.historyDniInput.value);
   if (!dni) {
-    clearHistoryPanel();
-    elements.historyList.textContent = "Digita una cedula para consultar sus registros.";
+    if (state.isAdmin) {
+      await loadRecentHistory();
+    } else {
+      clearHistoryPanel();
+      elements.historyList.textContent = "Digita una cedula para consultar sus registros.";
+    }
     return;
   }
   if (arguments[0] !== "keep-page") state.historyPage = 1;
@@ -2157,6 +2832,7 @@ async function loadLastAttendance(dni) {
     .from("asistencias")
     .select("id,fecha,hora,jornada,sentido,origen,enviado_buk,buk_status,colaboradores!inner(dni,nombre)")
     .eq("colaboradores.dni", cleanDni)
+    .gte("fecha", FECHA_CORTE_VALIDACIONES)
     .order("fecha", { ascending: false })
     .order("hora", { ascending: false })
     .limit(1);
@@ -2224,13 +2900,23 @@ function renderSentidoSelector() {
   elements.sentidoEntradaButton.classList.toggle("active", state.nextSentido === "entrada");
   elements.sentidoSalidaButton.classList.toggle("active", state.nextSentido === "salida");
 
+  // El tipo de marca NO es manipulable por el administrador: lo fija el factor
+  // dinamico (la ultima marca / turno abierto). Se bloquean los botones.
+  const bloquear = state.isAdmin;
+  elements.sentidoEntradaButton.disabled = bloquear;
+  elements.sentidoSalidaButton.disabled = bloquear;
+  elements.sentidoEntradaButton.classList.toggle("locked", bloquear);
+  elements.sentidoSalidaButton.classList.toggle("locked", bloquear);
+
   const suggested = getNextSentidoFromLastAttendance();
   if (!elements.sentidoSuggestion) return;
   if (!state.colaborador && !state.csvCandidate) {
     elements.sentidoSuggestion.textContent = "";
     return;
   }
-  if (state.nextSentido === suggested) {
+  if (bloquear) {
+    elements.sentidoSuggestion.textContent = `Definido automáticamente por la última marca: ${state.nextSentido.toUpperCase()} (no editable).`;
+  } else if (state.nextSentido === suggested) {
     elements.sentidoSuggestion.textContent = `Sugerido por la ultima marca: ${suggested}.`;
   } else {
     elements.sentidoSuggestion.textContent = `Estas registrando ${state.nextSentido} (sugerido era ${suggested}).`;
@@ -2261,180 +2947,6 @@ function renderJornadaHint() {
   const horaEntrada = String(state.lastAttendance.hora || "").slice(0, 5);
   elements.jornadaHint.textContent = `Cerrando turno nocturno: jornada ${entradaFecha} (entrada ${horaEntrada}).`;
   elements.jornadaHint.classList.remove("hidden");
-}
-
-function openPendingExitModal() {
-  const last = state.lastAttendance;
-  if (!last || last.sentido !== "entrada") return;
-  const colaborador = state.csvCandidate || state.colaborador;
-  if (!colaborador) return;
-
-  const horaEntrada = String(last.hora || "").slice(0, 5);
-  elements.pendingExitContext.textContent =
-    `Entrada registrada el ${last.fecha} a las ${horaEntrada}. Indica la fecha y hora reales en que el colaborador termino la jornada.`;
-  elements.pendingExitDate.value = "";
-  elements.pendingExitDate.min = last.fecha;
-  elements.pendingExitTime.value = "";
-  elements.pendingExitReason.value = "";
-  setMessage(elements.pendingExitMessage, "");
-  elements.pendingExitOverlay.classList.remove("hidden");
-  setTimeout(() => { try { elements.pendingExitDate.focus(); } catch (_) {} }, 50);
-}
-
-function closePendingExitModal() {
-  elements.pendingExitOverlay.classList.add("hidden");
-  setMessage(elements.pendingExitMessage, "");
-}
-
-async function submitPendingExitFromModal(event) {
-  event.preventDefault();
-  if (!requireOnline(elements.pendingExitMessage)) return;
-
-  const last = state.lastAttendance;
-  const colaboradorCsv = state.csvCandidate;
-  if (!last || last.sentido !== "entrada" || !colaboradorCsv) {
-    setMessage(elements.pendingExitMessage, "No se encontro la entrada pendiente. Vuelve a validar la cedula.", "error");
-    return;
-  }
-
-  const fecha = elements.pendingExitDate.value;
-  const hora = elements.pendingExitTime.value;
-  const motivo = elements.pendingExitReason.value.trim();
-  if (!fecha || !hora || !motivo) {
-    setMessage(elements.pendingExitMessage, "Completa fecha, hora y motivo.", "error");
-    return;
-  }
-
-  const horaConSegundos = hora.length === 5 ? `${hora}:00` : hora;
-  const entradaTs = new Date(`${last.fecha}T${String(last.hora).slice(0, 8)}`);
-  const salidaTs = new Date(`${fecha}T${horaConSegundos}`);
-  if (Number.isNaN(salidaTs.getTime()) || salidaTs <= entradaTs) {
-    setMessage(elements.pendingExitMessage, "La fecha y hora de salida deben ser posteriores a la entrada.", "error");
-    return;
-  }
-
-  setBusy(elements.pendingExitSubmit, true);
-  setMessage(elements.pendingExitMessage, "Registrando salida pendiente...");
-
-  try {
-    const colaborador = await ensureExistingCollaborator(colaboradorCsv);
-    if (!colaborador) {
-      setMessage(elements.pendingExitMessage, "No se pudo localizar el colaborador en la base.", "error");
-      return;
-    }
-
-    const jornadaBuk = computeJornadaForMark("salida", fecha, last.fecha);
-    const observacion = `Salida manual (entrada pendiente del ${last.fecha} ${String(last.hora).slice(0, 5)}). Motivo: ${motivo}`;
-
-    const { data: insertedAttendance, error: insertError } = await supabaseClient
-      .from("asistencias")
-      .insert({
-        colaborador_id: colaborador.id,
-        obra_id: colaborador.obra_id,
-        fecha,
-        hora: horaConSegundos,
-        jornada: jornadaBuk,
-        sentido: "salida",
-        origen: "manual_pendiente",
-        registrado_por: state.user.id,
-        observacion
-      })
-      .select("id")
-      .single();
-
-    if (insertError) throw insertError;
-
-    setMessage(elements.pendingExitMessage, "Consultando obra real del colaborador en Buk...");
-    const { obraId: obraIdReal } = await lookupObraIdDeColaborador(colaborador.dni);
-    const obraIdAUsar = obraIdReal || BUK_OBRA_ID;
-
-    let { data: bukData, error: bukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-      body: {
-        asistencia_id: insertedAttendance.id,
-        obra_id: obraIdAUsar,
-        dni_colaborador: colaborador.dni,
-        jornada: jornadaBuk,
-        fecha,
-        hora: horaConSegundos,
-        sentido: "salida"
-      }
-    });
-
-    if ((bukError || !bukData?.ok) && bukRespuestaMencionaEntradaPrevia(bukData)) {
-      const horaEntrada = String(last.hora || "").slice(0, 8);
-      const jornadaEntrada = last.jornada || last.fecha;
-      setMessage(elements.pendingExitMessage, `Reenviando entrada del ${last.fecha} ${horaEntrada.slice(0, 5)} (jornada ${jornadaEntrada}) a Buk...`);
-
-      const { data: entradaBuk, error: entradaBukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-        body: {
-          asistencia_id: last.id,
-          obra_id: obraIdAUsar,
-          dni_colaborador: colaborador.dni,
-          jornada: jornadaEntrada,
-          fecha: last.fecha,
-          hora: horaEntrada,
-          sentido: "entrada"
-        }
-      });
-
-      if (!entradaBukError && entradaBuk?.ok) {
-        setMessage(elements.pendingExitMessage, "Entrada reenviada. Reintentando la salida...");
-        const reintento = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-          body: {
-            asistencia_id: insertedAttendance.id,
-            obra_id: obraIdAUsar,
-            dni_colaborador: colaborador.dni,
-            jornada: jornadaBuk,
-            fecha,
-            hora: horaConSegundos,
-            sentido: "salida"
-          }
-        });
-        bukData = reintento.data;
-        bukError = reintento.error;
-      } else {
-        setMessage(
-          elements.pendingExitMessage,
-          `Buk no acepto la entrada al reenviarla: ${entradaBuk?.error || entradaBukError?.message || "sin detalle"}`,
-          "error"
-        );
-      }
-    }
-
-    const bukOk = !bukError && bukData?.ok;
-    await notifyManualExitWebhook({
-      colaborador,
-      colaboradorCsv,
-      entrada: last,
-      salida: { fecha, hora: horaConSegundos, jornada: jornadaBuk },
-      motivo,
-      bukOk,
-      bukResultado: bukData ?? { error: bukError?.message || "sin respuesta" },
-      asistenciaId: insertedAttendance.id
-    });
-
-    if (!bukOk) {
-      setMessage(elements.pendingExitMessage, "Salida guardada localmente, pero Buk/Ctrlit no acepto. Administracion fue notificada.", "error");
-    } else {
-      setMessage(elements.pendingExitMessage, "Salida registrada y enviada a Buk/Ctrlit.", "success");
-    }
-
-    resetAttendanceForm(true);
-
-    setTimeout(() => {
-      closePendingExitModal();
-      showAlertModal(
-        bukOk ? "Salida pendiente registrada" : "Salida registrada con observacion",
-        bukOk
-          ? `Se cerro la jornada ${jornadaBuk} con la salida ${fecha} ${hora}. Buk/Ctrlit recibio la marca y se notifico a administracion.`
-          : `Se guardo la salida ${fecha} ${hora} (jornada ${jornadaBuk}), pero Buk/Ctrlit no acepto. Administracion fue notificada para revisar.`
-      );
-    }, 600);
-  } catch (error) {
-    setMessage(elements.pendingExitMessage, error.message || "No se pudo registrar la salida pendiente.", "error");
-  } finally {
-    setBusy(elements.pendingExitSubmit, false);
-  }
 }
 
 async function notifyManualAdminExitWebhook(payload) {
@@ -2525,96 +3037,6 @@ async function notifyManualAdminExitWebhook(payload) {
   }
 }
 
-async function notifyManualExitWebhook(payload) {
-  const url = config.MANUAL_EXIT_WEBHOOK_URL;
-  if (!url) return;
-
-  const explicacion =
-    "Se registro una salida manual porque el colaborador tenia una entrada abierta sin cerrar. " +
-    "La salida se envio a Buk/Ctrlit usando la fecha real ingresada por el usuario y la jornada del dia de la entrada, " +
-    "de modo que el turno nocturno quede cerrado en el sistema de nomina. Este aviso permite a administracion auditar el caso.";
-
-  const ahora = new Date();
-  const horaAccion = ahora.toLocaleString("es-CO", {
-    timeZone: "America/Bogota",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false
-  });
-
-  let horasTurnoAbierto = null;
-  try {
-    const tsEntrada = new Date(`${payload.entrada.fecha}T${String(payload.entrada.hora || "00:00:00").slice(0, 8)}`);
-    const tsSalida = new Date(`${payload.salida.fecha}T${String(payload.salida.hora || "00:00:00").slice(0, 8)}`);
-    const diffMs = tsSalida.getTime() - tsEntrada.getTime();
-    if (Number.isFinite(diffMs) && diffMs > 0) {
-      const totalMin = Math.round(diffMs / 60000);
-      const dias = Math.floor(totalMin / 1440);
-      const horas = Math.floor((totalMin % 1440) / 60);
-      const minutos = totalMin % 60;
-      horasTurnoAbierto = dias >= 1
-        ? `${dias}d ${horas}h ${minutos}m`
-        : `${horas}h ${minutos}m`;
-    }
-  } catch (_) { /* ignorar */ }
-
-  const nombre = payload.colaboradorCsv?.nombre || payload.colaborador.nombre || null;
-  const dni = payload.colaborador.dni;
-  const novedad = `Conductor ${nombre || "(sin nombre)"} (cedula ${dni}) | Turno abierto: ${horasTurnoAbierto || "n/d"} | Motivo: ${payload.motivo}`;
-
-  const body = {
-    tipo: "salida_manual_entrada_pendiente",
-    explicacion,
-    novedad,
-    hora_accion: horaAccion,
-    enviado_en: ahora.toISOString(),
-    registrado_por: {
-      user_id: state.user?.id ?? null,
-      email: state.user?.email ?? null
-    },
-    colaborador: {
-      id: payload.colaborador.id,
-      dni,
-      nombre,
-      cargo: payload.colaboradorCsv?.cargo || null,
-      empresa: payload.colaboradorCsv?.empresa || payload.colaborador.empresa || null,
-      obra_id: payload.colaborador.obra_id || null
-    },
-    entrada_pendiente: {
-      asistencia_id: payload.entrada.id,
-      fecha: payload.entrada.fecha,
-      hora: String(payload.entrada.hora || "").slice(0, 8)
-    },
-    salida_registrada: {
-      asistencia_id: payload.asistenciaId,
-      fecha: payload.salida.fecha,
-      hora: payload.salida.hora,
-      jornada_buk: payload.salida.jornada
-    },
-    horas_turno_abierto: horasTurnoAbierto,
-    motivo: payload.motivo,
-    buk: {
-      ok: payload.bukOk,
-      resultado: payload.bukResultado
-    }
-  };
-
-  try {
-    await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      mode: "no-cors"
-    });
-  } catch (error) {
-    console.warn("No se pudo notificar webhook de salida manual", error);
-  }
-}
-
 function renderLastEntradaLabel(entrada) {
   if (!entrada) return 'Ultima entrada: <em>sin registros</em>';
   const hora = String(entrada.hora || "").slice(0, 5);
@@ -2644,6 +3066,73 @@ function computeOpenEntrada() {
   } else {
     state.openEntrada = null;
   }
+}
+
+function renderTurnoStatusBanner() {
+  const banner = elements.turnoStatusBanner;
+  if (!banner) return;
+
+  if (!state.csvCandidate) {
+    banner.className = "turno-status-banner hidden";
+    banner.innerHTML = "";
+    return;
+  }
+
+  const open = state.openEntrada;
+  let clase, icon, texto;
+
+  if (!open) {
+    clase = "ok";
+    icon = "check-circle-2";
+    texto = "Sin turno abierto. La próxima marca es ENTRADA.";
+  } else {
+    const hora = String(open.hora || "").slice(0, 5);
+    const today = getTodayParts().date;
+    if (open.fecha === today) {
+      clase = "warn";
+      icon = "alert-triangle";
+      texto = `Turno ABIERTO desde hoy ${hora}. La próxima marca debe ser SALIDA.`;
+    } else {
+      // Turno abierto de dias anteriores: no mostramos el letrero de alerta.
+      banner.className = "turno-status-banner hidden";
+      banner.innerHTML = "";
+      return;
+    }
+  }
+
+  banner.className = `turno-status-banner ${clase}`;
+  banner.innerHTML = `<i data-lucide="${icon}"></i><span>${escapeHtml(texto)}</span>`;
+  renderIcons();
+}
+
+async function confirmarCoherenciaTurno(sentido) {
+  // Valida la coherencia del turno antes de registrar y, si hay conflicto,
+  // muestra un modal explicando la situacion y ofreciendo la accion correcta.
+  // Devuelve el sentido con el que continuar, o null si el usuario cancela.
+  if (sentido === "entrada" && state.openEntrada) {
+    const hora = String(state.openEntrada.hora || "").slice(0, 5);
+    const cambiar = await confirmGraphical(
+      "Ya hay una entrada abierta",
+      `Este colaborador tiene una ENTRADA abierta del ${state.openEntrada.fecha} ${hora} sin registrar salida. No se puede registrar otra entrada. ¿Quieres registrar la SALIDA de ese turno?`,
+      "Sí, registrar salida",
+      "Cancelar"
+    );
+    if (cambiar) { setSentido("salida"); return "salida"; }
+    return null;
+  }
+
+  if (sentido === "salida" && !state.openEntrada) {
+    const cambiar = await confirmGraphical(
+      "No hay una entrada abierta",
+      "Una SALIDA necesita una ENTRADA previa y este colaborador no tiene un turno abierto. ¿Quieres registrar una ENTRADA en su lugar?",
+      "Sí, registrar entrada",
+      "Cancelar"
+    );
+    if (cambiar) { setSentido("entrada"); return "entrada"; }
+    return null;
+  }
+
+  return sentido;
 }
 
 async function loadOpenTurns() {
@@ -2741,12 +3230,6 @@ function renderOverdueTurns() {
         <td>${escapeHtml(cargo)}</td>
         <td>${escapeHtml(mark.fecha)} ${escapeHtml(String(mark.hora).slice(0, 5))}</td>
         <td class="${claseTiempo}">${escapeHtml(tiempoLabel)}</td>
-        <td>
-          <button type="button" class="secondary" data-close-turn="${escapeHtml(dni)}">
-            <i data-lucide="log-out"></i>
-            Cerrar turno
-          </button>
-        </td>
       </tr>
     `;
   }).join("");
@@ -2947,12 +3430,6 @@ function renderOpenTurns() {
         <td>${escapeHtml(cargo)}</td>
         <td>${escapeHtml(mark.fecha)} ${escapeHtml(String(mark.hora).slice(0,5))}</td>
         <td class="${claseTiempo}">${escapeHtml(tiempoLabel)}</td>
-        <td>
-          <button type="button" class="secondary" data-close-turn="${escapeHtml(dni)}">
-            <i data-lucide="log-out"></i>
-            Cerrar turno
-          </button>
-        </td>
       </tr>
     `;
   }).join("");
@@ -3054,16 +3531,6 @@ function exportOpenTurnsToCSV() {
   setMessage(elements.openTurnsStatus, `${rows.length} fila(s) exportadas a CSV.`, "success");
 }
 
-async function quickCloseTurn(dni) {
-  if (!state.isAdmin) return;
-  if (!dni) return;
-  showTab("admin");
-  elements.manualDniInput.value = dni;
-  elements.manualDniInput.focus();
-  elements.manualDniInput.scrollIntoView({ behavior: "smooth", block: "center" });
-  setMessage(elements.manualMessage, "Completa fecha, hora y motivo para cerrar este turno.", "success");
-}
-
 function confirmGraphical(title, text, acceptLabel = "Confirmar", cancelLabel = "Cancelar") {
   return new Promise((resolve) => {
     elements.confirmTitle.textContent = title;
@@ -3096,6 +3563,7 @@ async function loadLastEntradaForDni(dni) {
     .select("id,fecha,hora,jornada,sentido,enviado_buk,buk_status,colaboradores!inner(dni,nombre)")
     .eq("colaboradores.dni", cleanDni)
     .eq("sentido", "entrada")
+    .gte("fecha", FECHA_CORTE_VALIDACIONES)
     .order("fecha", { ascending: false })
     .order("hora", { ascending: false })
     .limit(1);
@@ -3105,6 +3573,27 @@ async function loadLastEntradaForDni(dni) {
   }
   state.lastEntrada = data?.[0] || null;
   return state.lastEntrada;
+}
+
+async function marcarEstadoBukEnAsistencia(asistenciaId, bukOk, bukData, bukError) {
+  if (!asistenciaId) return;
+  const bukErrorText = bukOk
+    ? null
+    : (mejorErrorBuk(bukData) || bukError?.message || "Buk/Ctrlit rechazo la marca.");
+  try {
+    await supabaseClient
+      .from("asistencias")
+      .update({
+        enviado_buk: !!bukOk,
+        buk_status: bukData?.status ?? null,
+        buk_error: bukErrorText,
+        buk_enviado_at: new Date().toISOString()
+      })
+      .eq("id", asistenciaId);
+  } catch (error) {
+    // La marca ya quedo guardada; si no se pudo actualizar el estado Buk, no abortamos.
+    console.warn("[BUK] no se pudo actualizar estado de la asistencia", error);
+  }
 }
 
 async function lookupObraIdDeColaborador(dni) {
@@ -3150,6 +3639,25 @@ async function findEntradaToCloseSalida(dni, salidaFecha, salidaHora) {
     const ts = new Date(`${row.fecha}T${horaNorm}`).getTime();
     return !Number.isNaN(ts) && ts < salidaTs;
   }) || null;
+}
+
+// Saca el error MAS significativo de la respuesta de Buk. La función Edge
+// reintenta con una obra de respaldo (ej. 39306) que no pertenece al colaborador,
+// y ese intento devuelve "no pertenece al recinto...", que TAPA el motivo real
+// (por ejemplo "Ya existe una marca de entrada"). Aquí priorizamos el motivo real.
+function mejorErrorBuk(bukData) {
+  if (!bukData) return null;
+  const intentos = Array.isArray(bukData.intentos) ? bukData.intentos : [];
+  const errores = intentos.map((i) => i?.error || i?.respuesta?.error).filter(Boolean).map(String);
+  const esRuido = (e) => /no pertenece al recinto|obra_id\).*empresa|pertenece al recinto/i.test(e);
+  const real =
+    errores.find((e) => /ya existe una marca/i.test(e)) ||
+    errores.find((e) => !esRuido(e)) ||
+    (bukData.error && !esRuido(String(bukData.error)) ? bukData.error : null) ||
+    errores[0] ||
+    bukData.error ||
+    null;
+  return real ? String(real) : null;
 }
 
 function bukRespuestaMencionaEntradaPrevia(bukData) {
@@ -3476,24 +3984,56 @@ function renderJourneyMark(mark, type) {
 
   const date = type === "salida" && mark.fecha ? ` · ${escapeHtml(mark.fecha)}` : "";
   const origin = mark.origen ? ` · ${escapeHtml(mark.origen)}` : "";
+  const delBtn = HABILITAR_ELIMINAR_MARCAS && mark.id
+    ? `<button type="button" class="journey-del" data-del-id="${escapeHtml(String(mark.id))}"
+         data-del-label="${escapeHtml(`${type} ${String(mark.hora).slice(0, 5)}${mark.fecha ? " del " + mark.fecha : ""}`)}"
+         title="Eliminar marca (prueba)" aria-label="Eliminar marca">🗑</button>`
+    : "";
   return `
     <div class="journey-mark">
       <span class="pill ${escapeHtml(type)}">${escapeHtml(String(mark.hora).slice(0, 5))}</span>
       <small>${date}${origin}</small>
+      ${delBtn}
     </div>
   `;
-}
-
-function renderJourneyBuk(item) {
-  const statuses = [item.entrada, item.salida]
-    .filter(Boolean)
-    .map((mark) => mark.enviado_buk ? "OK" : String(mark.buk_status || "Pendiente"));
-  return escapeHtml(statuses.length ? Array.from(new Set(statuses)).join(" / ") : "Pendiente");
 }
 
 function formatMarkNote(mark) {
   if (!mark?.observacion) return "";
   return `${mark.sentido}: ${mark.observacion}`;
+}
+
+// TEMPORAL (pruebas): borra una marca via RPC eliminar_asistencia, con confirmacion.
+async function eliminarMarcaPrueba(id, label) {
+  if (!id) return;
+  const ok = await confirmGraphical(
+    "Eliminar marca de prueba",
+    `¿Seguro que quieres ELIMINAR la marca de ${label}? Esta acción no se puede deshacer.`,
+    "Sí, eliminar",
+    "Cancelar"
+  );
+  if (!ok) return;
+
+  const { data, error } = await supabaseClient.rpc("eliminar_asistencia", { p_id: id });
+  if (error || !data?.ok) {
+    const msg = `No se pudo eliminar: ${error?.message || data?.error || "error desconocido"}`;
+    setMessage(elements.adminMarksStatus, msg, "error");
+    setMessage(elements.journalStatus, msg, "error");
+    return;
+  }
+
+  // Quita la marca del estado local de AMBAS tablas (Marcas e Ingresos y salidas)
+  // y re-renderiza sin recargar todo.
+  if (Array.isArray(state.adminMarks)) {
+    state.adminMarks = state.adminMarks.filter((m) => m.id !== id);
+    renderAdminMarks();
+  }
+  if (Array.isArray(state.journalMarks)) {
+    state.journalMarks = state.journalMarks.filter((m) => m.id !== id);
+    renderJournalMarks();
+  }
+  setMessage(elements.adminMarksStatus, `Marca eliminada (${label}).`, "success");
+  setMessage(elements.journalStatus, `Marca eliminada (${label}).`, "success");
 }
 
 function calculateJourneyDuration(entrada, salida) {
@@ -3538,6 +4078,991 @@ function getDisplayNameForDni(dni, localName = "") {
 
   const csvRow = state.csvRows.find((row) => normalizeDni(row.cedula) === normalizeDni(dni));
   return csvRow?.nombre || cleanLocalName || "";
+}
+
+function setupJournalDefaults() {
+  if (elements.journalDateFromInput.value || elements.journalDateToInput.value) return;
+  const now = getTodayParts();
+  elements.journalDateFromInput.value = `${now.year}-${now.month}-01`;
+  elements.journalDateToInput.value = now.date;
+}
+
+async function loadJournalMarks() {
+  if (!state.isAdmin) return;
+  if (!requireOnline(elements.journalStatus)) return;
+
+  await ensureCsvLoaded();
+  const desde = (elements.journalDateFromInput.value || "").trim();
+  const hasta = (elements.journalDateToInput.value || "").trim();
+
+  if (desde && hasta && desde > hasta) {
+    elements.journalStatus.textContent = "El rango de fechas es invalido (Desde > Hasta).";
+    return;
+  }
+
+  setBusy(elements.reloadJournalButton, true);
+  elements.journalStatus.textContent = "Cargando ingresos y salidas...";
+
+  const PAGE = 1000;
+  const TOPE = 20000;
+  let acumulado = [];
+  let offset = 0;
+
+  try {
+    while (offset < TOPE) {
+      let query = supabaseClient
+        .from("asistencias")
+        .select("id,fecha,hora,jornada,sentido,origen,observacion,enviado_buk,buk_status,colaboradores(dni,nombre)")
+        .order("fecha", { ascending: false })
+        .order("hora", { ascending: false });
+
+      if (desde) query = query.gte("fecha", desde);
+      if (hasta) query = query.lte("fecha", hasta);
+      query = query.range(offset, offset + PAGE - 1);
+
+      elements.journalStatus.textContent = `Cargando ingresos y salidas... (${acumulado.length})`;
+      const { data, error } = await query;
+      if (error) {
+        elements.journalStatus.textContent = "No se pudieron cargar los ingresos y salidas.";
+        return;
+      }
+      const batch = data || [];
+      acumulado = acumulado.concat(batch);
+      if (batch.length < PAGE) break;
+      offset += PAGE;
+    }
+
+    state.journalMarks = acumulado;
+    state.journalLoaded = true;
+    populateJournalCargoFilter();
+    state.journalPage = 1;
+    renderJournalMarks();
+  } finally {
+    setBusy(elements.reloadJournalButton, false);
+  }
+}
+
+function populateJournalCargoFilter() {
+  const current = new Set(getSelectedJournalCargos());
+  const cargos = Array.from(new Set(state.journalMarks
+    .map((item) => getCargoForDni(item.colaboradores?.dni))
+    .filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b));
+
+  elements.journalCargoFilter.innerHTML = cargos.map((cargo) => `
+    <option value="${escapeHtml(cargo)}" ${current.has(cargo) ? "selected" : ""}>${escapeHtml(cargo)}</option>
+  `).join("");
+}
+
+function getSelectedJournalCargos() {
+  return Array.from(elements.journalCargoFilter.selectedOptions || []).map((option) => option.value);
+}
+
+function getFilteredJournalRows() {
+  const nameQuery = elements.journalSearchInput.value.trim().toLowerCase();
+  const dniQuery = normalizeDni(elements.journalSearchInput.value);
+  const selectedCargos = getSelectedJournalCargos();
+
+  return buildAdminJourneys(state.journalMarks).filter((item) => {
+    const dni = item.dni || "";
+    const name = item.nombre || getDisplayNameForDni(dni);
+    const cargo = getCargoForDni(dni);
+
+    if (nameQuery || dniQuery) {
+      const matchName = name.toLowerCase().includes(nameQuery);
+      const matchDni = dniQuery && normalizeDni(dni).includes(dniQuery);
+      if (!matchName && !matchDni) return false;
+    }
+    if (selectedCargos.length && !selectedCargos.includes(cargo)) return false;
+    return true;
+  });
+}
+
+function renderJournalMarks() {
+  const rows = getFilteredJournalRows();
+  state.journalFiltered = rows;
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / state.journalPageSize));
+  if (state.journalPage > totalPages) state.journalPage = totalPages;
+  const start = (state.journalPage - 1) * state.journalPageSize;
+  const pageRows = rows.slice(start, start + state.journalPageSize);
+
+  elements.journalStatus.textContent = `${rows.length} jornadas (${state.journalMarks.length} marcas)`;
+  elements.journalPageLabel.textContent = `Página ${state.journalPage} de ${totalPages}`;
+  elements.journalPrevPageButton.disabled = state.journalPage <= 1;
+  elements.journalNextPageButton.disabled = state.journalPage >= totalPages;
+  elements.journalBody.innerHTML = pageRows.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.fecha)}</td>
+      <td>${escapeHtml(item.dni || "")}</td>
+      <td>${escapeHtml(item.nombre || "")}</td>
+      <td>${escapeHtml(getCargoForDni(item.dni) || "")}</td>
+      <td>${renderJourneyMark(item.entrada, "entrada")}</td>
+      <td>${renderJourneyMark(item.salida, "salida")}</td>
+      <td>${escapeHtml(item.tiempo || "")}</td>
+      <td>${renderJourneyBuk(item)}</td>
+    </tr>
+  `).join("");
+  renderIcons();
+}
+
+function renderJourneyBuk(item) {
+  const statuses = [item.entrada, item.salida]
+    .filter(Boolean)
+    .map((mark) => mark.enviado_buk ? "OK" : String(mark.buk_status || "Pendiente"));
+  return escapeHtml(statuses.length ? Array.from(new Set(statuses)).join(" / ") : "Pendiente");
+}
+
+function exportJournalToCsv() {
+  const rows = state.journalFiltered || [];
+  if (!rows.length) {
+    setMessage(elements.journalStatus, "No hay ingresos y salidas para exportar con el filtro actual.", "error");
+    return;
+  }
+
+  const header = ["Fecha", "Cedula", "Nombre", "Cargo", "Entrada", "Salida (fecha)", "Salida (hora)", "Tiempo", "Buk", "Observacion"];
+  const escapeCsv = (val) => {
+    const s = String(val ?? "");
+    if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const lineas = [header.join(";")];
+  rows.forEach((item) => {
+    const dni = item.dni || "";
+    const bukStatuses = [item.entrada, item.salida]
+      .filter(Boolean)
+      .map((mark) => mark.enviado_buk ? "OK" : String(mark.buk_status || "Pendiente"));
+    lineas.push([
+      item.fecha || "",
+      dni,
+      item.nombre || getDisplayNameForDni(dni) || "",
+      getCargoForDni(dni) || "",
+      item.entrada ? String(item.entrada.hora).slice(0, 5) : "",
+      item.salida ? (item.salida.fecha || "") : "",
+      item.salida ? String(item.salida.hora).slice(0, 5) : "",
+      item.tiempo || "",
+      bukStatuses.length ? Array.from(new Set(bukStatuses)).join(" / ") : "Pendiente",
+      item.observacion || ""
+    ].map(escapeCsv).join(";"));
+  });
+
+  const desde = (elements.journalDateFromInput.value || "").trim();
+  const hasta = (elements.journalDateToInput.value || "").trim();
+  const rango = desde || hasta ? `-${desde || "inicio"}_a_${hasta || "hoy"}` : "";
+  triggerCsvDownload(lineas.join("\r\n"), `ingresos-salidas${rango}.csv`);
+  setMessage(elements.journalStatus, `${rows.length} jornada(s) exportadas a CSV.`, "success");
+}
+
+function setupRechazoDefaults() {
+  if (elements.rechazoDateFromInput.value || elements.rechazoDateToInput.value) return;
+  const now = getTodayParts();
+  elements.rechazoDateFromInput.value = `${now.year}-${now.month}-01`;
+  elements.rechazoDateToInput.value = now.date;
+}
+
+async function loadRechazoMarks() {
+  if (!state.isAdmin) return;
+  if (!requireOnline(elements.rechazoStatus)) return;
+
+  await ensureCsvLoaded();
+  const desde = (elements.rechazoDateFromInput.value || "").trim();
+  const hasta = (elements.rechazoDateToInput.value || "").trim();
+
+  if (desde && hasta && desde > hasta) {
+    elements.rechazoStatus.textContent = "El rango de fechas es invalido (Desde > Hasta).";
+    return;
+  }
+
+  setBusy(elements.reloadRechazoButton, true);
+  elements.rechazoStatus.textContent = "Cargando marcas rechazadas por Buk...";
+
+  const PAGE = 1000;
+  const TOPE = 20000;
+  let acumulado = [];
+  let offset = 0;
+
+  try {
+    while (offset < TOPE) {
+      let query = supabaseClient
+        .from("asistencias")
+        .select("id,fecha,hora,jornada,sentido,origen,observacion,enviado_buk,buk_status,buk_error,colaboradores(dni,nombre)")
+        .not("enviado_buk", "is", true)
+        .order("fecha", { ascending: false })
+        .order("hora", { ascending: false });
+
+      if (desde) query = query.gte("fecha", desde);
+      if (hasta) query = query.lte("fecha", hasta);
+      query = query.range(offset, offset + PAGE - 1);
+
+      elements.rechazoStatus.textContent = `Cargando marcas rechazadas por Buk... (${acumulado.length})`;
+      const { data, error } = await query;
+      if (error) {
+        elements.rechazoStatus.textContent = "No se pudieron cargar las marcas rechazadas.";
+        return;
+      }
+      const batch = data || [];
+      acumulado = acumulado.concat(batch);
+      if (batch.length < PAGE) break;
+      offset += PAGE;
+    }
+
+    state.rechazoMarks = acumulado;
+    state.rechazoLoaded = true;
+    state.rechazoPage = 1;
+    renderRechazoMarks();
+  } finally {
+    setBusy(elements.reloadRechazoButton, false);
+  }
+}
+
+function getFilteredRechazoRows() {
+  const nameQuery = elements.rechazoSearchInput.value.trim().toLowerCase();
+  const dniQuery = normalizeDni(elements.rechazoSearchInput.value);
+
+  return (state.rechazoMarks || []).filter((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    const name = (mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "").toLowerCase();
+    if (nameQuery || dniQuery) {
+      const matchName = name.includes(nameQuery);
+      const matchDni = dniQuery && normalizeDni(dni).includes(dniQuery);
+      if (!matchName && !matchDni) return false;
+    }
+    return true;
+  });
+}
+
+function rechazoEstadoBuk(mark) {
+  return mark.buk_error || mark.buk_status || "Sin enviar";
+}
+
+function renderRechazoMarks() {
+  const rows = getFilteredRechazoRows();
+  state.rechazoFiltered = rows;
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / state.rechazoPageSize));
+  if (state.rechazoPage > totalPages) state.rechazoPage = totalPages;
+  const start = (state.rechazoPage - 1) * state.rechazoPageSize;
+  const pageRows = rows.slice(start, start + state.rechazoPageSize);
+
+  elements.rechazoStatus.textContent = rows.length
+    ? `${rows.length} marca(s) no confirmada(s) por Buk`
+    : "Sin marcas rechazadas por Buk en el rango consultado.";
+  elements.rechazoPageLabel.textContent = `Página ${state.rechazoPage} de ${totalPages}`;
+  elements.rechazoPrevPageButton.disabled = state.rechazoPage <= 1;
+  elements.rechazoNextPageButton.disabled = state.rechazoPage >= totalPages;
+  elements.rechazoBody.innerHTML = pageRows.map((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    const nombre = mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "Sin nombre";
+    return `
+      <tr>
+        <td>${escapeHtml(mark.fecha)}</td>
+        <td>${escapeHtml(String(mark.hora).slice(0, 5))}</td>
+        <td>${escapeHtml(dni)}</td>
+        <td>${escapeHtml(nombre)}</td>
+        <td>${escapeHtml(getCargoForDni(dni) || "")}</td>
+        <td><span class="pill ${escapeHtml(mark.sentido)}">${escapeHtml(mark.sentido)}</span></td>
+        <td>${escapeHtml(mark.origen || "")}</td>
+        <td>${escapeHtml(rechazoEstadoBuk(mark))}</td>
+        <td>${escapeHtml(mark.observacion || "")}</td>
+        <td><button type="button" class="mini-button rechazo-resend" data-resend-id="${escapeHtml(String(mark.id))}">Reenviar a Buk</button></td>
+      </tr>
+    `;
+  }).join("");
+  renderIcons();
+}
+
+// Reenvía UNA marca rechazada a Buk reusando la función Edge enviar-asistencia-buk.
+// Es "inteligente" para el error "el dni no pertenece al recinto (obra_id) o a la
+// empresa": le pregunta a Buk TODAS las obras del colaborador y las prueba una por
+// una hasta que alguna acepte la marca. Si el error no es de obra/empresa, no
+// insiste con más obras.
+async function reenviarMarcaBuk(mark) {
+  const dni = mark.colaboradores?.dni || "";
+  if (!dni) return { ok: false, error: "La marca no tiene cédula asociada." };
+
+  const { obraId, lookup } = await lookupObraIdDeColaborador(dni);
+
+  // Lista de obras candidatas (sin repetir, respetando el tipo original).
+  const candidatas = [];
+  const vistas = new Set();
+  const agregar = (v) => {
+    if (v === null || v === undefined || v === "") return;
+    const key = String(v);
+    if (vistas.has(key)) return;
+    vistas.add(key);
+    candidatas.push(v);
+  };
+  agregar(obraId);
+  agregar(lookup?.obra_id_principal);
+  (Array.isArray(lookup?.obra_ids) ? lookup.obra_ids : []).forEach(agregar);
+  agregar(BUK_OBRA_ID);
+
+  let ultimoError = "No se pudo enviar a Buk.";
+  for (const obra of candidatas) {
+    const payload = {
+      obra_id: obra,
+      dni_colaborador: dni,
+      jornada: mark.jornada || mark.fecha,
+      fecha: mark.fecha,
+      hora: String(mark.hora).slice(0, 8),
+      sentido: mark.sentido
+    };
+    const { data: bukData, error: bukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", { body: payload });
+    if (!bukError && bukData?.ok) {
+      await marcarEstadoBukEnAsistencia(mark.id, true, bukData);
+      return { ok: true, obra };
+    }
+    ultimoError = mejorErrorBuk(bukData) || bukError?.message || ultimoError;
+    // Si Buk dice que YA existe la marca, no es un rechazo real: ya está en Buk.
+    if (/ya existe una marca/i.test(ultimoError)) {
+      return { ok: false, yaExiste: true, error: ultimoError };
+    }
+    // Solo tiene sentido probar otra obra si el error es justamente de obra/empresa.
+    if (!/recinto|obra|empresa|pertenece/i.test(ultimoError)) break;
+  }
+
+  await marcarEstadoBukEnAsistencia(mark.id, false, { error: ultimoError });
+  return { ok: false, error: ultimoError };
+}
+
+async function onReenviarUnaMarca(id) {
+  const mark = (state.rechazoMarks || []).find((m) => m.id === id);
+  if (!mark) return;
+  setMessage(elements.rechazoStatus, `Reenviando a Buk (${mark.colaboradores?.dni || ""})...`, "");
+  const res = await reenviarMarcaBuk(mark);
+  if (res.ok) {
+    state.rechazoMarks = state.rechazoMarks.filter((m) => m.id !== id);
+    renderRechazoMarks();
+    setMessage(elements.rechazoStatus, `✅ Marca reenviada y aceptada por Buk (obra ${res.obra}).`, "success");
+    return;
+  }
+
+  // Caso especial: Buk dice que la marca YA existe. No es un rechazo real, ya está
+  // en Buk. Ofrecemos marcarla como confirmada para sacarla de pendientes.
+  if (res.yaExiste) {
+    const marcar = await confirmGraphical(
+      "La marca ya está en Buk",
+      `Buk indica: "${res.error}". Es decir, esta marca YA está registrada en Buk (no es un rechazo real). ¿Quieres marcarla como CONFIRMADA para sacarla de la lista de pendientes?`,
+      "Sí, marcar como confirmada",
+      "Dejarla como está"
+    );
+    if (marcar) {
+      await marcarEstadoBukEnAsistencia(mark.id, true, { status: 200 });
+      state.rechazoMarks = state.rechazoMarks.filter((m) => m.id !== id);
+      renderRechazoMarks();
+      setMessage(elements.rechazoStatus, "✅ Marca confirmada (ya estaba en Buk).", "success");
+    } else {
+      mark.buk_error = res.error;
+      renderRechazoMarks();
+    }
+    return;
+  }
+
+  mark.buk_error = res.error;
+  renderRechazoMarks();
+  setMessage(elements.rechazoStatus, `❌ Buk volvió a rechazar: ${res.error}`, "error");
+}
+
+async function reenviarTodasRechazo() {
+  const rows = getFilteredRechazoRows();
+  if (!rows.length) {
+    setMessage(elements.rechazoStatus, "No hay marcas para reenviar con el filtro actual.", "error");
+    return;
+  }
+  const ok = await confirmGraphical(
+    "Reenviar todas a Buk",
+    `Se intentará reenviar ${rows.length} marca(s) a Buk. Las que tengan errores permanentes (por ejemplo "el dni no pertenece al recinto o empresa") seguirán fallando hasta que se corrijan en Buk. ¿Continuar?`,
+    "Sí, reenviar todas",
+    "Cancelar"
+  );
+  if (!ok) return;
+
+  setBusy(elements.resendAllRechazoButton, true);
+  let aceptadas = 0;
+  let fallidas = 0;
+  for (const mark of [...rows]) {
+    setMessage(elements.rechazoStatus, `Reenviando ${aceptadas + fallidas + 1}/${rows.length}...`, "");
+    const res = await reenviarMarcaBuk(mark);
+    if (res.ok) {
+      aceptadas += 1;
+      state.rechazoMarks = state.rechazoMarks.filter((m) => m.id !== mark.id);
+    } else {
+      fallidas += 1;
+      mark.buk_error = res.error;
+    }
+  }
+  renderRechazoMarks();
+  setBusy(elements.resendAllRechazoButton, false);
+  setMessage(
+    elements.rechazoStatus,
+    `Reenvío terminado: ${aceptadas} aceptada(s), ${fallidas} sigue(n) fallando.`,
+    aceptadas ? "success" : "error"
+  );
+}
+
+function exportRechazoToCsv() {
+  const rows = state.rechazoFiltered || [];
+  if (!rows.length) {
+    setMessage(elements.rechazoStatus, "No hay marcas rechazadas para exportar con el filtro actual.", "error");
+    return;
+  }
+
+  const header = ["Fecha", "Hora", "Cedula", "Nombre", "Cargo", "Tipo", "Origen", "Estado Buk", "Observacion"];
+  const escapeCsv = (val) => {
+    const s = String(val ?? "");
+    if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const lineas = [header.join(";")];
+  rows.forEach((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    lineas.push([
+      mark.fecha || "",
+      String(mark.hora).slice(0, 5),
+      dni,
+      mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "",
+      getCargoForDni(dni) || "",
+      mark.sentido || "",
+      mark.origen || "",
+      rechazoEstadoBuk(mark),
+      mark.observacion || ""
+    ].map(escapeCsv).join(";"));
+  });
+
+  const desde = (elements.rechazoDateFromInput.value || "").trim();
+  const hasta = (elements.rechazoDateToInput.value || "").trim();
+  const rango = desde || hasta ? `-${desde || "inicio"}_a_${hasta || "hoy"}` : "";
+  triggerCsvDownload(lineas.join("\r\n"), `rechazos-buk${rango}.csv`);
+  setMessage(elements.rechazoStatus, `${rows.length} marca(s) exportadas a CSV.`, "success");
+}
+
+function setupInconsistDefaults() {
+  if (elements.inconsistDateFromInput.value || elements.inconsistDateToInput.value) return;
+  const now = getTodayParts();
+  elements.inconsistDateFromInput.value = `${now.year}-${now.month}-01`;
+  elements.inconsistDateToInput.value = now.date;
+}
+
+async function loadInconsistMarks() {
+  if (!state.isAdmin) return;
+  if (!requireOnline(elements.inconsistStatus)) return;
+
+  await ensureCsvLoaded();
+  const desde = (elements.inconsistDateFromInput.value || "").trim();
+  const hasta = (elements.inconsistDateToInput.value || "").trim();
+
+  if (desde && hasta && desde > hasta) {
+    elements.inconsistStatus.textContent = "El rango de fechas es invalido (Desde > Hasta).";
+    return;
+  }
+
+  setBusy(elements.reloadInconsistButton, true);
+  elements.inconsistStatus.textContent = "Analizando registros...";
+  setMessage(elements.inconsistMessage, "");
+
+  const PAGE = 1000;
+  const TOPE = 20000;
+  let acumulado = [];
+  let offset = 0;
+
+  try {
+    while (offset < TOPE) {
+      let query = supabaseClient
+        .from("asistencias")
+        .select("id,fecha,hora,sentido,origen,enviado_buk,buk_status,colaboradores(dni,nombre)")
+        .order("fecha", { ascending: false })
+        .order("hora", { ascending: false });
+
+      if (desde) query = query.gte("fecha", desde);
+      if (hasta) query = query.lte("fecha", hasta);
+      query = query.range(offset, offset + PAGE - 1);
+
+      const { data, error } = await query;
+      if (error) {
+        elements.inconsistStatus.textContent = "No se pudieron cargar los registros.";
+        return;
+      }
+      const batch = data || [];
+      acumulado = acumulado.concat(batch);
+      if (batch.length < PAGE) break;
+      offset += PAGE;
+    }
+
+    state.inconsistMarks = acumulado;
+    state.inconsistRows = detectarInconsistencias(acumulado);
+    state.inconsistLoaded = true;
+    renderInconsistencias();
+  } finally {
+    setBusy(elements.reloadInconsistButton, false);
+  }
+}
+
+function detectarInconsistencias(marks) {
+  const byDni = new Map();
+  marks.forEach((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    if (!dni) return;
+    if (!byDni.has(dni)) byDni.set(dni, []);
+    byDni.get(dni).push(mark);
+  });
+
+  const rows = [];
+  byDni.forEach((items, dni) => {
+    const sorted = [...items].sort((a, b) => compareMarkDateTime(a, b));
+    let prev = null;
+
+    sorted.forEach((m) => {
+      if (m.sentido === "entrada") {
+        if (prev && prev.sentido === "entrada") {
+          rows.push(buildInconsistRow(dni, prev, "Dos entradas seguidas (falta salida)"));
+        }
+        prev = m;
+      } else if (m.sentido === "salida") {
+        if (!prev) {
+          rows.push(buildInconsistRow(dni, m, "Salida sin entrada previa"));
+        } else if (prev.sentido === "salida") {
+          rows.push(buildInconsistRow(dni, m, "Dos salidas seguidas"));
+        }
+        prev = m;
+      }
+    });
+
+    if (prev && prev.sentido === "entrada") {
+      rows.push(buildInconsistRow(dni, prev, "Entrada sin salida (turno abierto)"));
+    }
+  });
+
+  return rows.sort((a, b) => `${b.fecha}T${b.hora}`.localeCompare(`${a.fecha}T${a.hora}`));
+}
+
+function buildInconsistRow(dni, mark, problema) {
+  return {
+    id: mark.id,
+    dni,
+    nombre: mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "Sin nombre",
+    cargo: getCargoForDni(dni) || "",
+    problema,
+    fecha: mark.fecha,
+    hora: String(mark.hora).slice(0, 8),
+    sentido: mark.sentido,
+    origen: mark.origen || "",
+    enviado_buk: mark.enviado_buk,
+    buk_status: mark.buk_status
+  };
+}
+
+function getFilteredInconsistRows() {
+  const q = elements.inconsistSearchInput.value.trim().toLowerCase();
+  const qDni = normalizeDni(elements.inconsistSearchInput.value);
+  return (state.inconsistRows || []).filter((r) => {
+    if (!q && !qDni) return true;
+    const matchName = r.nombre.toLowerCase().includes(q);
+    const matchDni = qDni && normalizeDni(r.dni).includes(qDni);
+    return matchName || matchDni;
+  });
+}
+
+function renderInconsistencias() {
+  const rows = getFilteredInconsistRows();
+
+  elements.inconsistStatus.textContent = rows.length
+    ? `${rows.length} marca(s) con problemas de secuencia entrada/salida`
+    : "Sin registros mal formados en el rango consultado. Todo en orden.";
+
+  const hoy = getTodayParts().date;
+  elements.inconsistBody.innerHTML = rows.map((r) => {
+    const dias = diffDaysBetween(r.fecha, hoy);
+    const antig = Number.isFinite(dias) ? `${dias} día${dias === 1 ? "" : "s"}` : "";
+    const bukTag = r.enviado_buk ? "Buk OK" : `Buk ${r.buk_status || "sin enviar"}`;
+    const claseProblema = /^(Dos salidas|Salida sin)/.test(r.problema) ? "turno-alerta-critica" : "turno-alerta-media";
+    return `
+      <tr>
+        <td>${escapeHtml(r.dni)}</td>
+        <td>${escapeHtml(r.nombre)}</td>
+        <td>${escapeHtml(r.cargo)}</td>
+        <td class="${claseProblema}">${escapeHtml(r.problema)}</td>
+        <td>${escapeHtml(r.fecha)}</td>
+        <td>${escapeHtml(String(r.hora).slice(0, 5))}</td>
+        <td><span class="pill ${escapeHtml(r.sentido)}">${escapeHtml(r.sentido)}</span></td>
+        <td>${escapeHtml(antig)}</td>
+        <td>${escapeHtml(r.origen)}</td>
+        <td>${escapeHtml(bukTag)}</td>
+        <td>
+          <button type="button" class="mini-button danger" data-del-mark="${escapeHtml(r.id)}"
+            data-dni="${escapeHtml(r.dni)}" data-fecha="${escapeHtml(r.fecha)}"
+            data-hora="${escapeHtml(String(r.hora).slice(0, 5))}" data-sentido="${escapeHtml(r.sentido)}"
+            data-buk="${r.enviado_buk ? "1" : "0"}">
+            <i data-lucide="trash-2"></i>
+            Eliminar
+          </button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+  renderIcons();
+}
+
+async function eliminarMarcaInconsistente(info) {
+  if (!state.isAdmin) return;
+  if (!requireOnline(elements.inconsistMessage)) return;
+
+  const avisoBuk = info.buk === "1"
+    ? " ATENCION: esta marca YA fue enviada a Buk/Ctrlit; eliminarla aqui NO la borra de Buk (nomina). Debes corregirla tambien en Buk."
+    : "";
+
+  const ok = await confirmGraphical(
+    "Eliminar marca",
+    `Vas a ELIMINAR la ${String(info.sentido).toUpperCase()} del ${info.fecha} ${info.hora} (cedula ${info.dni}). Esta accion no se puede deshacer.${avisoBuk}`,
+    "Sí, eliminar",
+    "Cancelar"
+  );
+  if (!ok) return;
+
+  setMessage(elements.inconsistMessage, "Eliminando marca...");
+  const { data, error } = await supabaseClient
+    .from("asistencias")
+    .delete()
+    .eq("id", info.id)
+    .select("id");
+
+  if (error) {
+    setMessage(elements.inconsistMessage, `No se pudo eliminar la marca: ${error.message}`, "error");
+    return;
+  }
+
+  if (!data || !data.length) {
+    setMessage(
+      elements.inconsistMessage,
+      "No se eliminó la marca. Es probable que las políticas de la base (RLS) no permitan borrar en la tabla asistencias. Avísame para prepararte la política que autorice a los administradores a eliminar.",
+      "error"
+    );
+    return;
+  }
+
+  setMessage(elements.inconsistMessage, `Marca eliminada (${info.sentido} ${info.fecha} ${info.hora}).`, "success");
+  await loadInconsistMarks();
+}
+
+function exportInconsistToCsv() {
+  const rows = getFilteredInconsistRows();
+  if (!rows.length) {
+    setMessage(elements.inconsistMessage, "No hay registros mal formados para exportar.", "error");
+    return;
+  }
+
+  const header = ["Cedula", "Nombre", "Cargo", "Problema", "Fecha", "Hora", "Tipo", "Origen", "Buk"];
+  const escapeCsv = (val) => {
+    const s = String(val ?? "");
+    if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const lineas = [header.join(";")];
+  rows.forEach((r) => {
+    lineas.push([
+      r.dni,
+      r.nombre,
+      r.cargo,
+      r.problema,
+      r.fecha,
+      String(r.hora).slice(0, 5),
+      r.sentido,
+      r.origen,
+      r.enviado_buk ? "Buk OK" : `Buk ${r.buk_status || "sin enviar"}`
+    ].map(escapeCsv).join(";"));
+  });
+
+  const desde = (elements.inconsistDateFromInput.value || "").trim();
+  const hasta = (elements.inconsistDateToInput.value || "").trim();
+  const rango = desde || hasta ? `-${desde || "inicio"}_a_${hasta || "hoy"}` : "";
+  triggerCsvDownload(lineas.join("\r\n"), `registros-inconsistentes${rango}.csv`);
+  setMessage(elements.inconsistMessage, `${rows.length} fila(s) exportadas a CSV.`, "success");
+}
+
+// ===== Vigilancia: conductores sin marca propia =====
+
+async function loadSinMarca() {
+  if (!requireOnline(elements.sinMarcaStatus)) return;
+  const dias = Math.max(1, Math.min(365, parseInt(elements.sinMarcaDaysInput.value, 10) || 90));
+  const maxBio = Math.max(0, Math.min(20, parseInt(elements.sinMarcaMaxBioInput.value, 10) || 0));
+  elements.sinMarcaStatus.textContent = "Analizando conductores...";
+  setMessage(elements.sinMarcaMessage, "");
+  elements.sinMarcaBody.innerHTML = "";
+  try {
+    const { data, error } = await supabaseClient.rpc("conductores_sin_marca_propia", {
+      p_dias: dias,
+      p_max_bio: maxBio
+    });
+    if (error) throw error;
+    state.sinMarcaRows = Array.isArray(data) ? data : [];
+    state.sinMarcaLoaded = true;
+    renderSinMarca();
+  } catch (error) {
+    elements.sinMarcaStatus.textContent = "No se pudieron cargar los conductores.";
+    setMessage(elements.sinMarcaMessage, error.message || "Error al consultar.", "error");
+  }
+}
+
+function getFilteredSinMarcaRows() {
+  const q = elements.sinMarcaSearchInput.value.trim().toLowerCase();
+  const qDni = normalizeDni(elements.sinMarcaSearchInput.value);
+  return (state.sinMarcaRows || []).filter((r) => {
+    if (!q) return true;
+    return String(r.nombre || "").toLowerCase().includes(q) || String(r.dni || "").includes(qDni);
+  });
+}
+
+function renderSinMarca() {
+  const rows = getFilteredSinMarcaRows();
+  elements.sinMarcaStatus.textContent = rows.length
+    ? `${rows.length} conductor(es) en vigilancia.`
+    : "Sin conductores que cumplan el filtro.";
+  elements.sinMarcaBody.innerHTML = rows.map((r) => {
+    const alerta = Number(r.biometricas) === 0 ? ' class="row-danger"' : "";
+    return `<tr${alerta}>
+      <td>${escapeHtml(String(r.dni))}</td>
+      <td>${escapeHtml(String(r.nombre || ""))}</td>
+      <td>${escapeHtml(String(r.cargo || ""))}</td>
+      <td>${r.total}</td>
+      <td>${r.reg_admin}</td>
+      <td>${r.biometricas}</td>
+      <td>${r.pct_admin}%</td>
+      <td>${escapeHtml(String(r.ultima_marca || ""))}</td>
+    </tr>`;
+  }).join("");
+}
+
+function exportSinMarcaToCsv() {
+  const rows = getFilteredSinMarcaRows();
+  if (!rows.length) {
+    setMessage(elements.sinMarcaMessage, "No hay conductores para exportar.", "error");
+    return;
+  }
+  const header = ["Cedula", "Nombre", "Cargo", "Total marcas", "Registradas por admin", "Biometricas propias", "% admin", "Ultima marca"];
+  const escapeCsv = (val) => {
+    const s = String(val ?? "");
+    if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lineas = [header.join(";")];
+  rows.forEach((r) => {
+    lineas.push([r.dni, r.nombre, r.cargo, r.total, r.reg_admin, r.biometricas, `${r.pct_admin}%`, r.ultima_marca].map(escapeCsv).join(";"));
+  });
+  triggerCsvDownload(lineas.join("\r\n"), "conductores-sin-marca-propia.csv");
+  setMessage(elements.sinMarcaMessage, `${rows.length} fila(s) exportadas a CSV.`, "success");
+}
+
+// ===== Validacion de turnos (jornadas emparejadas entrada->salida desde el 8-jul) =====
+
+function setupValidacionDefaults() {
+  if (elements.validacionDateFromInput.value || elements.validacionDateToInput.value) return;
+  elements.validacionDateFromInput.value = FECHA_CORTE_VALIDACIONES;
+  elements.validacionDateToInput.value = getTodayParts().date;
+}
+
+function markTsValidacion(m) {
+  if (!m || !m.fecha) return 0;
+  return new Date(`${m.fecha}T${String(m.hora || "00:00:00").slice(0, 8)}`).getTime();
+}
+
+async function loadValidacionTurnos() {
+  if (!state.isAdmin) return;
+  if (!requireOnline(elements.validacionStatus)) return;
+  await ensureCsvLoaded();
+
+  const desde = (elements.validacionDateFromInput.value || "").trim();
+  const hasta = (elements.validacionDateToInput.value || "").trim();
+  if (desde && hasta && desde > hasta) {
+    elements.validacionStatus.textContent = "El rango de fechas es inválido (Desde > Hasta).";
+    return;
+  }
+
+  setBusy(elements.reloadValidacionButton, true);
+  elements.validacionStatus.textContent = "Analizando jornadas...";
+  setMessage(elements.validacionMessage, "");
+
+  // Cargamos un dia antes del "desde" para emparejar turnos nocturnos que cruzan la medianoche.
+  const desdeBuffer = desde ? addDays(desde, -1) : desde;
+  const maxHoras = Math.max(1, parseInt(elements.validacionMaxHorasInput.value, 10) || 14);
+
+  const PAGE = 1000;
+  const TOPE = 40000;
+  let acumulado = [];
+  let offset = 0;
+  try {
+    while (offset < TOPE) {
+      let query = supabaseClient
+        .from("asistencias")
+        .select("id,fecha,hora,jornada,sentido,origen,enviado_buk,buk_status,colaboradores(dni,nombre)")
+        .order("fecha", { ascending: true })
+        .order("hora", { ascending: true });
+      if (desdeBuffer) query = query.gte("fecha", desdeBuffer);
+      if (hasta) query = query.lte("fecha", hasta);
+      query = query.range(offset, offset + PAGE - 1);
+      const { data, error } = await query;
+      if (error) {
+        elements.validacionStatus.textContent = "No se pudieron cargar los registros.";
+        return;
+      }
+      const batch = data || [];
+      acumulado = acumulado.concat(batch);
+      if (batch.length < PAGE) break;
+      offset += PAGE;
+    }
+
+    let rows = construirJornadasValidacion(acumulado, maxHoras);
+    // Solo mostramos jornadas ancladas en el rango pedido (el buffer es solo para emparejar).
+    if (desde) rows = rows.filter((r) => (r.entradaFecha && r.entradaFecha >= desde) || (r.salidaFecha && r.salidaFecha >= desde));
+    rows.sort((a, b) => b.ordenTs - a.ordenTs);
+    state.validacionRows = rows;
+    state.validacionLoaded = true;
+    renderValidacion();
+  } finally {
+    setBusy(elements.reloadValidacionButton, false);
+  }
+}
+
+function construirJornadasValidacion(marks, maxHoras) {
+  const byDni = new Map();
+  marks.forEach((m) => {
+    const dni = normalizeDni(m.colaboradores?.dni || "");
+    if (!dni) return;
+    if (!byDni.has(dni)) byDni.set(dni, []);
+    byDni.get(dni).push(m);
+  });
+
+  const rows = [];
+  byDni.forEach((items, dni) => {
+    const sorted = [...items].sort((a, b) => markTsValidacion(a) - markTsValidacion(b));
+    let abierta = null;
+    sorted.forEach((m) => {
+      if (m.sentido === "entrada") {
+        if (abierta) rows.push(makeJornadaValidacion(dni, abierta, null, "abierta_doble", maxHoras));
+        abierta = m;
+      } else if (m.sentido === "salida") {
+        if (abierta) { rows.push(makeJornadaValidacion(dni, abierta, m, "cerrada", maxHoras)); abierta = null; }
+        else rows.push(makeJornadaValidacion(dni, null, m, "salida_sin_entrada", maxHoras));
+      }
+    });
+    if (abierta) rows.push(makeJornadaValidacion(dni, abierta, null, "abierta", maxHoras));
+  });
+  return rows;
+}
+
+function makeJornadaValidacion(dni, entrada, salida, tipo, maxHoras) {
+  const nombre = entrada?.colaboradores?.nombre || salida?.colaboradores?.nombre || getDisplayNameForDni(dni) || "Sin nombre";
+  const cargo = getCargoForDni(dni) || "";
+  const jornada = entrada?.jornada || salida?.jornada || entrada?.fecha || salida?.fecha || "";
+  let horas = null;
+  if (entrada && salida) {
+    const diff = markTsValidacion(salida) - markTsValidacion(entrada);
+    horas = diff > 0 ? diff / 3600000 : 0;
+  }
+  const bukProblema = [entrada, salida].some((m) => m && (m.enviado_buk === false || m.buk_status === 400));
+
+  let etiqueta, severidad, cat;
+  if (tipo === "salida_sin_entrada") { etiqueta = "Salida sin entrada"; severidad = "danger"; cat = "salida_sin"; }
+  else if (tipo === "abierta_doble") { etiqueta = "Doble entrada (falta salida)"; severidad = "danger"; cat = "doble"; }
+  else if (tipo === "abierta") { etiqueta = "Turno abierto"; severidad = "warn"; cat = "abierto"; }
+  else if (horas != null && horas > maxHoras) { etiqueta = `Exceso de horas (${horas.toFixed(1)} h)`; severidad = "danger"; cat = "exceso"; }
+  else if (bukProblema) { etiqueta = "Rechazo/no envío Buk"; severidad = "warn"; cat = "buk"; }
+  else { etiqueta = "Correcto"; severidad = "ok"; cat = "correcto"; }
+
+  return {
+    dni, nombre, cargo, jornada,
+    entradaFecha: entrada?.fecha || "", entradaHora: entrada ? String(entrada.hora).slice(0, 5) : "",
+    salidaFecha: salida?.fecha || "", salidaHora: salida ? String(salida.hora).slice(0, 5) : "",
+    horas, bukProblema, etiqueta, severidad, cat,
+    ordenTs: Math.max(markTsValidacion(entrada), markTsValidacion(salida))
+  };
+}
+
+function getFilteredValidacionRows() {
+  const q = elements.validacionSearchInput.value.trim().toLowerCase();
+  const qDni = normalizeDni(elements.validacionSearchInput.value);
+  const tipo = elements.validacionFiltroTipo.value;
+  return (state.validacionRows || []).filter((r) => {
+    if (tipo === "problemas" && r.severidad === "ok") return false;
+    if (tipo === "secuencia" && r.cat !== "doble" && r.cat !== "salida_sin") return false;
+    if (tipo !== "todas" && tipo !== "problemas" && tipo !== "secuencia" && r.cat !== tipo) return false;
+    if (!q && !qDni) return true;
+    const matchName = r.nombre.toLowerCase().includes(q);
+    const matchDni = qDni && normalizeDni(r.dni).includes(qDni);
+    return matchName || matchDni;
+  });
+}
+
+function renderValidacion() {
+  const all = state.validacionRows || [];
+  const rows = getFilteredValidacionRows();
+
+  const cont = { ok: 0, abierto: 0, secuencia: 0, exceso: 0, buk: 0 };
+  all.forEach((r) => {
+    if (r.severidad === "ok") cont.ok++;
+    else if (r.etiqueta === "Turno abierto") cont.abierto++;
+    else if (/Exceso/.test(r.etiqueta)) cont.exceso++;
+    else if (/Buk/.test(r.etiqueta)) cont.buk++;
+    else cont.secuencia++;
+  });
+
+  elements.validacionResumen.innerHTML = `
+    <button type="button" class="chip todas" data-filtro="todas">Todas: ${all.length}</button>
+    <button type="button" class="chip ok" data-filtro="correcto">Correctos: ${cont.ok}</button>
+    <button type="button" class="chip warn" data-filtro="abierto">Turnos abiertos: ${cont.abierto}</button>
+    <button type="button" class="chip danger" data-filtro="secuencia">Secuencia: ${cont.secuencia}</button>
+    <button type="button" class="chip danger" data-filtro="exceso">Exceso horas: ${cont.exceso}</button>
+    <button type="button" class="chip warn" data-filtro="buk">Rechazo Buk: ${cont.buk}</button>
+  `;
+
+  elements.validacionStatus.textContent = `${all.length} jornada(s) analizadas (${rows.length} en pantalla).`;
+
+  elements.validacionBody.innerHTML = rows.map((r) => {
+    const horasTxt = r.horas != null ? `${r.horas.toFixed(1)} h` : "--";
+    const bukTxt = r.bukProblema ? "Problema" : "OK";
+    return `
+      <tr class="${r.severidad === "danger" ? "row-danger" : ""}">
+        <td>${escapeHtml(r.dni)}</td>
+        <td>${escapeHtml(r.nombre)}</td>
+        <td>${escapeHtml(r.cargo)}</td>
+        <td>${escapeHtml(r.jornada)}</td>
+        <td>${r.entradaFecha ? escapeHtml(`${r.entradaFecha} ${r.entradaHora}`) : "--"}</td>
+        <td>${r.salidaFecha ? escapeHtml(`${r.salidaFecha} ${r.salidaHora}`) : "--"}</td>
+        <td>${escapeHtml(horasTxt)}</td>
+        <td>${escapeHtml(bukTxt)}</td>
+        <td><span class="valid-pill ${r.severidad}">${escapeHtml(r.etiqueta)}</span></td>
+      </tr>`;
+  }).join("");
+}
+
+function exportValidacionToCsv() {
+  const rows = getFilteredValidacionRows();
+  if (!rows.length) {
+    setMessage(elements.validacionMessage, "No hay jornadas para exportar.", "error");
+    return;
+  }
+  const header = ["Cedula", "Nombre", "Cargo", "Jornada", "Entrada", "Salida", "Horas", "Buk", "Validacion"];
+  const escapeCsv = (val) => {
+    const s = String(val ?? "");
+    if (/[";\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const lineas = [header.join(";")];
+  rows.forEach((r) => {
+    lineas.push([
+      r.dni, r.nombre, r.cargo, r.jornada,
+      r.entradaFecha ? `${r.entradaFecha} ${r.entradaHora}` : "",
+      r.salidaFecha ? `${r.salidaFecha} ${r.salidaHora}` : "",
+      r.horas != null ? r.horas.toFixed(1) : "",
+      r.bukProblema ? "Problema" : "OK",
+      r.etiqueta
+    ].map(escapeCsv).join(";"));
+  });
+  const desde = (elements.validacionDateFromInput.value || "").trim();
+  const hasta = (elements.validacionDateToInput.value || "").trim();
+  triggerCsvDownload(lineas.join("\r\n"), `validacion-turnos-${desde || "inicio"}_a_${hasta || "hoy"}.csv`);
+  setMessage(elements.validacionMessage, `${rows.length} jornada(s) exportadas a CSV.`, "success");
 }
 
 function renderSonarDriverOptions() {
@@ -3837,6 +5362,168 @@ async function assignSonarDriverManually(event) {
   }
 }
 
+// ===== Salida manual segura: codigo dinamico + ubicacion + selfie del lider =====
+
+function resetManualSecureBlock() {
+  state.manualAuthId = null;
+  state.manualLocation = null;
+  state.manualSelfieBlob = null;
+  if (elements.manualCodeShown) {
+    elements.manualCodeShown.classList.add("hidden");
+    elements.manualCodeShown.textContent = "";
+  }
+  if (elements.manualCodeInput) {
+    elements.manualCodeInput.value = "";
+    elements.manualCodeInput.disabled = true;
+  }
+  if (elements.manualLocationStatus) {
+    elements.manualLocationStatus.textContent = "Ubicación obligatoria: se captura automáticamente.";
+    elements.manualLocationStatus.classList.remove("ok");
+  }
+  elements.manualLocationButton?.classList.add("hidden");
+  elements.manualCameraButton?.classList.remove("hidden");
+  stopManualCamera();
+  if (elements.manualPhotoPreview) elements.manualPhotoPreview.classList.add("hidden");
+}
+
+async function manualRequestCode() {
+  if (!requireOnline(elements.manualMessage)) return;
+  const dni = normalizeDni(elements.manualDniInput.value);
+  const categoria = elements.manualReasonCategory.value;
+  if (!dni || !categoria) {
+    setMessage(elements.manualMessage, "Primero escribe la cédula y elige el motivo, luego solicita el código.", "error");
+    return;
+  }
+  const detalle = elements.manualReasonInput.value.trim();
+  const motivo = categoria === "Otro" ? detalle : (detalle ? `${categoria}: ${detalle}` : categoria);
+
+  setBusy(elements.manualCodeButton, true);
+  try {
+    const { data, error } = await supabaseClient.rpc("generar_codigo_salida_manual", {
+      p_colaborador_dni: dni,
+      p_motivo: motivo
+    });
+    if (error) throw error;
+    state.manualAuthId = data.id;
+    elements.manualCodeShown.textContent = `Código: ${data.codigo} (válido 5 minutos)`;
+    elements.manualCodeShown.classList.remove("hidden");
+    elements.manualCodeInput.disabled = false;
+    elements.manualCodeInput.value = "";
+    elements.manualCodeInput.focus();
+    setMessage(elements.manualMessage, "Código generado. Escríbelo abajo para confirmar.", "success");
+    // Si aun no hay ubicacion, intentala automaticamente en paralelo.
+    if (!state.manualLocation) manualAutoLocation();
+  } catch (error) {
+    setMessage(elements.manualMessage, error.message || "No se pudo generar el código.", "error");
+  } finally {
+    setBusy(elements.manualCodeButton, false);
+  }
+}
+
+// Intenta capturar la ubicacion automaticamente (sin que el usuario toque el boton).
+// Si el permiso esta bloqueado, muestra el boton/ayuda para habilitarlo.
+async function manualAutoLocation() {
+  if (!navigator.geolocation) return;
+  if (state.manualLocation) return;
+  const permiso = await estadoPermisoUbicacion();
+  if (permiso === "denied") {
+    elements.manualLocationButton?.classList.remove("hidden");
+    elements.manualLocationStatus.textContent = "Ubicación BLOQUEADA en el navegador. Habilítala para poder registrar.";
+    elements.manualLocationStatus.classList.remove("ok");
+    return;
+  }
+  // 'granted' o 'prompt': capturar directo.
+  await manualCaptureLocation();
+}
+
+async function manualCaptureLocation() {
+  if (!requireOnline(elements.manualMessage)) return;
+  setBusy(elements.manualLocationButton, true);
+  elements.manualLocationStatus.textContent = "Obteniendo ubicación automáticamente...";
+  elements.manualLocationStatus.classList.remove("ok");
+  try {
+    const location = await getLocation();
+    if (location.error || !location.latitud || !location.longitud) {
+      state.manualLocation = null;
+      elements.manualLocationButton?.classList.remove("hidden");
+      elements.manualLocationStatus.textContent = `${location.message || "No se pudo obtener la ubicación."} Toca "Activar ubicación" para reintentar.`;
+      if (location.error === "denied") mostrarInstruccionesUbicacionDenegada?.();
+      return;
+    }
+    state.manualLocation = location;
+    elements.manualLocationButton?.classList.add("hidden");
+    elements.manualLocationStatus.textContent =
+      `Ubicación lista: Lat ${Number(location.latitud).toFixed(6)}, Lon ${Number(location.longitud).toFixed(6)} (±${Math.round(location.precision || 0)} m).`;
+    elements.manualLocationStatus.classList.add("ok");
+    maybeAutoOpenManualCamera();
+  } finally {
+    setBusy(elements.manualLocationButton, false);
+  }
+}
+
+// Abre la camara sola cuando ya se completaron los pasos previos y falta la foto.
+function maybeAutoOpenManualCamera() {
+  const dni = normalizeDni(elements.manualDniInput.value);
+  const categoria = elements.manualReasonCategory.value;
+  const codigo = elements.manualCodeInput.value.trim();
+  const listo = dni && categoria && state.manualAuthId && codigo.length === 6 && state.manualLocation;
+  if (!listo) return;
+  if (state.manualSelfieBlob) return;   // ya hay foto
+  if (state.manualCameraStream) return; // camara ya abierta
+  manualStartCamera();
+}
+
+async function manualStartCamera() {
+  if (!requireOnline(elements.manualMessage)) return;
+  if (state.manualCameraStream) {
+    elements.manualCameraBox.classList.remove("hidden");
+    return;
+  }
+  try {
+    state.manualCameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    elements.manualCameraVideo.srcObject = state.manualCameraStream;
+    elements.manualCameraBox.classList.remove("hidden");
+    elements.manualPhotoPreview.classList.add("hidden");
+    elements.manualCameraButton?.classList.add("hidden");
+    setMessage(elements.manualMessage, "Cámara abierta: toma la foto del líder.", "");
+  } catch (_error) {
+    // Si el navegador bloquea la apertura automatica, mostramos el boton para hacerlo manual.
+    elements.manualCameraButton?.classList.remove("hidden");
+    setMessage(elements.manualMessage, "Toca \"Abrir cámara\" para tomar la foto del líder.", "error");
+  }
+}
+
+function stopManualCamera() {
+  if (state.manualCameraStream) {
+    state.manualCameraStream.getTracks().forEach((track) => track.stop());
+    state.manualCameraStream = null;
+  }
+  if (elements.manualCameraVideo) elements.manualCameraVideo.srcObject = null;
+  if (elements.manualCameraBox) elements.manualCameraBox.classList.add("hidden");
+}
+
+async function manualCapturePhoto() {
+  const video = elements.manualCameraVideo;
+  if (!video.videoWidth || !video.videoHeight) {
+    setMessage(elements.manualMessage, "La cámara aún no está lista.", "error");
+    return;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+  const compressed = await compressImage(new File([blob], "selfie.jpg", { type: "image/jpeg" }), 720, 0.72);
+  state.manualSelfieBlob = compressed;
+  elements.manualPhotoImg.src = URL.createObjectURL(compressed);
+  elements.manualPhotoPreview.classList.remove("hidden");
+  stopManualCamera();
+  setMessage(elements.manualMessage, "Foto del líder lista.", "success");
+}
+
 async function registerManualExit(event) {
   event.preventDefault();
   if (!state.isAdmin) return;
@@ -3845,12 +5532,37 @@ async function registerManualExit(event) {
   const dni = normalizeDni(elements.manualDniInput.value);
   const fecha = elements.manualDateInput.value;
   const hora = elements.manualTimeInput.value;
-  const motivo = elements.manualReasonInput.value.trim();
+  const categoria = elements.manualReasonCategory.value;
+  const detalle = elements.manualReasonInput.value.trim();
 
-  if (!dni || !fecha || !hora || !motivo) {
+  if (!dni || !fecha || !hora || !categoria) {
     setMessage(elements.manualMessage, "Completa cedula, fecha, hora y motivo.", "error");
     return;
   }
+
+  if (categoria === "Otro" && !detalle) {
+    setMessage(elements.manualMessage, "Cuando el motivo es 'Otro' debes escribir el detalle.", "error");
+    return;
+  }
+
+  // Blindaje antifraude: codigo dinamico + ubicacion + selfie del lider son obligatorios.
+  const codigo = elements.manualCodeInput.value.trim();
+  if (!state.manualAuthId || !codigo) {
+    setMessage(elements.manualMessage, "Solicita el código de autorización (paso 1) y escríbelo antes de registrar.", "error");
+    return;
+  }
+  if (!state.manualLocation) {
+    setMessage(elements.manualMessage, "Activa la ubicación (paso 2). Es obligatoria para registrar.", "error");
+    return;
+  }
+  if (!state.manualSelfieBlob) {
+    setMessage(elements.manualMessage, "Toma la foto del líder (paso 3). Es obligatoria para registrar.", "error");
+    return;
+  }
+
+  const motivo = categoria === "Otro"
+    ? detalle
+    : (detalle ? `${categoria}: ${detalle}` : categoria);
 
   const csvCollaborator = await findActiveCsvCollaborator(dni);
   if (!csvCollaborator) {
@@ -3862,6 +5574,16 @@ async function registerManualExit(event) {
   setMessage(elements.manualMessage, "Validando ultima marca...");
 
   try {
+    // 1) Validar el codigo dinamico ANTES de tocar nada (sin consumirlo todavia).
+    setMessage(elements.manualMessage, "Validando código de autorización...");
+    const { error: codeError } = await supabaseClient.rpc("validar_codigo_salida_manual", {
+      p_id: state.manualAuthId,
+      p_codigo: codigo
+    });
+    if (codeError) {
+      throw new Error(codeError.message || "Código de autorización inválido o vencido.");
+    }
+
     const colaborador = await ensureExistingCollaborator(csvCollaborator);
     if (!colaborador) return;
 
@@ -3897,7 +5619,19 @@ async function registerManualExit(event) {
       );
     }
 
-    const observacion = `Salida manual. Motivo: ${motivo}`;
+    // 2) Subir la selfie del lider (evidencia obligatoria). Si falla, abortamos
+    //    (el codigo sigue sin consumirse) para no dejar salidas sin evidencia.
+    setMessage(elements.manualMessage, "Subiendo foto del líder...");
+    const selfiePath = `salidas-manuales/${fecha}/${dni}-${Date.now()}.webp`;
+    const { error: selfieError } = await supabaseClient.storage
+      .from(config.FOTO_BUCKET)
+      .upload(selfiePath, state.manualSelfieBlob, { contentType: "image/webp", upsert: false });
+    if (selfieError) {
+      throw new Error(`No se pudo subir la foto del líder: ${selfieError.message || "error de almacenamiento"}. Intenta de nuevo.`);
+    }
+
+    const ubic = state.manualLocation;
+    const observacion = `Salida manual. Motivo: ${motivo} | Autorizada por ${state.user.email || state.user.id} con código`;
     const { data: insertedAttendance, error: insertError } = await supabaseClient
       .from("asistencias")
       .insert({
@@ -3909,6 +5643,11 @@ async function registerManualExit(event) {
         sentido: "salida",
         origen: "manual",
         registrado_por: state.user.id,
+        foto_path: selfiePath,
+        foto_eliminar_en: addDays(getTodayParts().date, 25),
+        latitud: ubic?.latitud ?? null,
+        longitud: ubic?.longitud ?? null,
+        ubicacion_precision_m: ubic?.precision ?? null,
         observacion
       })
       .select("id")
@@ -3933,6 +5672,24 @@ async function registerManualExit(event) {
 
     const bukOk = !bukError && !!bukData?.ok;
 
+    await marcarEstadoBukEnAsistencia(insertedAttendance.id, bukOk, bukData, bukError);
+
+    // 3) Consumir el codigo (un solo uso) y dejar la auditoria completa:
+    //    quien, ubicacion, foto y referencia a la marca creada.
+    const { error: consumeError } = await supabaseClient.rpc("consumir_codigo_salida_manual", {
+      p_id: state.manualAuthId,
+      p_codigo: codigo,
+      p_latitud: ubic?.latitud ?? null,
+      p_longitud: ubic?.longitud ?? null,
+      p_precision_m: ubic?.precision ?? null,
+      p_foto_path: selfiePath,
+      p_colaborador_id: String(colaborador.id),
+      p_asistencia_id: String(insertedAttendance.id)
+    });
+    if (consumeError) {
+      console.error("[SALIDA MANUAL] no se pudo consumir el codigo", consumeError);
+    }
+
     await notifyManualAdminExitWebhook({
       colaborador,
       colaboradorCsv: csvCollaborator,
@@ -3951,6 +5708,11 @@ async function registerManualExit(event) {
     }
 
     elements.manualReasonInput.value = "";
+    elements.manualReasonCategory.value = "";
+    elements.manualDniInput.value = "";
+    elements.manualDateInput.value = "";
+    elements.manualTimeInput.value = "";
+    resetManualSecureBlock();
     await loadAdminMarks();
     loadOpenTurns().catch(() => {});
   } catch (error) {
@@ -4150,11 +5912,13 @@ elements.logoutButton.addEventListener("click", logout);
 elements.registerTabButton.addEventListener("click", () => showTab("register"));
 elements.historyTabButton.addEventListener("click", () => {
   showTab("history");
-  setupHistoryDefaults();
-  if (!normalizeDni(elements.historyDniInput.value)) clearHistoryPanel();
 });
 elements.databaseTabButton.addEventListener("click", () => showTab("database"));
-elements.adminTabButton.addEventListener("click", () => showTab("admin"));
+elements.adminTabButton.addEventListener("click", async () => {
+  const ok = await requireAdminClave();
+  if (ok) showTab("admin");
+});
+elements.manualExitTabButton?.addEventListener("click", () => showTab("manualexit"));
 elements.searchButton.addEventListener("click", buscarColaborador);
 elements.dniInput.addEventListener("input", scheduleDniValidation);
 elements.dniInput.addEventListener("keydown", (event) => {
@@ -4165,6 +5929,37 @@ elements.dniInput.addEventListener("keydown", (event) => {
 });
 elements.cameraButton.addEventListener("click", startCamera);
 elements.locationButton.addEventListener("click", captureCurrentLocation);
+
+// Menos pasos: tocar la caja de ubicacion (estado o el recuadro del mapa cuando
+// aun esta vacio) activa el GPS sin tener que buscar el boton "Activar ubicacion".
+// Si el mapa de Leaflet ya existe, no interceptamos el toque (deja mover el mapa).
+function activarUbicacionSiFalta() {
+  if (state.currentLocation) return;
+  captureCurrentLocation();
+}
+elements.locationStatus?.addEventListener("click", activarUbicacionSiFalta);
+elements.locationMap?.addEventListener("click", () => {
+  if (!state.locationMap) activarUbicacionSiFalta();
+});
+
+// Tutorial "¿Cómo marcar?"
+elements.tutorialButton?.addEventListener("click", openTutorial);
+elements.tutorialClose?.addEventListener("click", closeTutorial);
+elements.tutorialNext?.addEventListener("click", tutorialNext);
+elements.tutorialPrev?.addEventListener("click", tutorialPrev);
+elements.tutorialOverlay?.addEventListener("click", (event) => {
+  if (event.target === elements.tutorialOverlay) closeTutorial();
+});
+
+// TEMPORAL (pruebas): botón de eliminar marca en el panel de administración.
+// Aplica a las dos tablas que muestran marcas: "Marcas" y "Ingresos y salidas".
+function onEliminarMarcaClick(event) {
+  const btn = event.target.closest(".journey-del");
+  if (!btn) return;
+  eliminarMarcaPrueba(btn.getAttribute("data-del-id"), btn.getAttribute("data-del-label") || "esta marca");
+}
+elements.adminMarksBody?.addEventListener("click", onEliminarMarcaClick);
+elements.journalBody?.addEventListener("click", onEliminarMarcaClick);
 elements.vehicleInput.addEventListener("input", () => {
   updateVehicleHint();
   if (state.isDriverCandidate) renderAttendanceDriverBox();
@@ -4193,8 +5988,14 @@ elements.adminSubtabs?.addEventListener("click", (event) => {
 elements.attendanceForm.addEventListener("submit", submitAttendance);
 elements.reportDateInput.addEventListener("input", () => { state.reportDateTouched = true; });
 elements.reportTimeInput.addEventListener("input", () => { state.reportTimeTouched = true; });
-elements.sentidoEntradaButton.addEventListener("click", () => setSentido("entrada"));
-elements.sentidoSalidaButton.addEventListener("click", () => setSentido("salida"));
+elements.sentidoEntradaButton.addEventListener("click", () => {
+  if (state.isAdmin) { setMessage(elements.formMessage, "El tipo de marca lo define el sistema según la última marca. No es editable.", "error"); return; }
+  setSentido("entrada");
+});
+elements.sentidoSalidaButton.addEventListener("click", () => {
+  if (state.isAdmin) { setMessage(elements.formMessage, "El tipo de marca lo define el sistema según la última marca. No es editable.", "error"); return; }
+  setSentido("salida");
+});
 elements.refreshButton.addEventListener("click", refreshCurrentHistory);
 elements.historySearchButton.addEventListener("click", refreshCurrentHistory);
 elements.historyDniInput.addEventListener("keydown", (event) => {
@@ -4224,28 +6025,25 @@ elements.alertButton.addEventListener("click", async () => {
     await startCamera();
   }
 });
-elements.pendingExitCancel.addEventListener("click", () => {
-  closePendingExitModal();
-});
-elements.pendingExitForm.addEventListener("submit", submitPendingExitFromModal);
+elements.registroSuccessButton.addEventListener("click", hideRegistroModal);
 elements.openTurnsReloadButton.addEventListener("click", loadOpenTurns);
 elements.openTurnsExportButton.addEventListener("click", exportOpenTurnsToCSV);
 elements.overdueTurnsExportButton.addEventListener("click", exportOverdueTurnsToCSV);
-elements.overdueTurnsBody.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-close-turn]");
-  if (!button) return;
-  quickCloseTurn(button.dataset.closeTurn);
-});
-elements.openTurnsBody.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-close-turn]");
-  if (!button) return;
-  quickCloseTurn(button.dataset.closeTurn);
-});
 elements.openTurnsSearchInput.addEventListener("input", () => renderOpenTurns());
 elements.openTurnsCargoFilter.addEventListener("change", () => renderOpenTurns());
 elements.reloadCsvButton.addEventListener("click", loadCollaboratorsCsv);
 elements.csvSearchInput.addEventListener("input", renderCsvTable);
 elements.manualExitForm.addEventListener("submit", registerManualExit);
+elements.manualCodeButton?.addEventListener("click", manualRequestCode);
+elements.manualLocationButton?.addEventListener("click", manualCaptureLocation);
+elements.manualCameraButton?.addEventListener("click", manualStartCamera);
+elements.manualCaptureButton?.addEventListener("click", manualCapturePhoto);
+elements.manualCameraCancelButton?.addEventListener("click", stopManualCamera);
+elements.manualPhotoRetakeButton?.addEventListener("click", manualStartCamera);
+// Al completar el codigo (6 digitos), abre la camara sola para tomar la selfie.
+elements.manualCodeInput?.addEventListener("input", () => {
+  if (elements.manualCodeInput.value.trim().length === 6) maybeAutoOpenManualCamera();
+});
 elements.sonarAdminForm.addEventListener("submit", assignSonarDriverManually);
 elements.loadSonarDriversButton.addEventListener("click", loadSonarDrivers);
 elements.sonarDriverSearchInput.addEventListener("input", renderSonarDriverOptions);
@@ -4288,6 +6086,102 @@ elements.adminPrevPageButton.addEventListener("click", () => {
 elements.adminNextPageButton.addEventListener("click", () => {
   state.adminPage += 1;
   renderAdminMarks();
+});
+elements.reloadJournalButton.addEventListener("click", () => {
+  state.journalPage = 1;
+  loadJournalMarks();
+});
+elements.exportJournalButton.addEventListener("click", exportJournalToCsv);
+elements.journalSearchInput.addEventListener("input", () => {
+  state.journalPage = 1;
+  renderJournalMarks();
+});
+elements.journalCargoFilter.addEventListener("change", () => {
+  state.journalPage = 1;
+  renderJournalMarks();
+});
+elements.journalDateFromInput.addEventListener("change", () => {
+  state.journalPage = 1;
+  loadJournalMarks();
+});
+elements.journalDateToInput.addEventListener("change", () => {
+  state.journalPage = 1;
+  loadJournalMarks();
+});
+elements.journalPrevPageButton.addEventListener("click", () => {
+  state.journalPage = Math.max(1, state.journalPage - 1);
+  renderJournalMarks();
+});
+elements.journalNextPageButton.addEventListener("click", () => {
+  state.journalPage += 1;
+  renderJournalMarks();
+});
+elements.reloadRechazoButton.addEventListener("click", () => {
+  state.rechazoPage = 1;
+  loadRechazoMarks();
+});
+elements.exportRechazoButton.addEventListener("click", exportRechazoToCsv);
+elements.resendAllRechazoButton?.addEventListener("click", reenviarTodasRechazo);
+elements.rechazoBody?.addEventListener("click", (event) => {
+  const btn = event.target.closest(".rechazo-resend");
+  if (!btn) return;
+  btn.disabled = true;
+  onReenviarUnaMarca(btn.getAttribute("data-resend-id"));
+});
+elements.rechazoSearchInput.addEventListener("input", () => {
+  state.rechazoPage = 1;
+  renderRechazoMarks();
+});
+elements.rechazoDateFromInput.addEventListener("change", () => {
+  state.rechazoPage = 1;
+  loadRechazoMarks();
+});
+elements.rechazoDateToInput.addEventListener("change", () => {
+  state.rechazoPage = 1;
+  loadRechazoMarks();
+});
+elements.rechazoPrevPageButton.addEventListener("click", () => {
+  state.rechazoPage = Math.max(1, state.rechazoPage - 1);
+  renderRechazoMarks();
+});
+elements.rechazoNextPageButton.addEventListener("click", () => {
+  state.rechazoPage += 1;
+  renderRechazoMarks();
+});
+elements.reloadInconsistButton.addEventListener("click", loadInconsistMarks);
+elements.exportInconsistButton.addEventListener("click", exportInconsistToCsv);
+elements.inconsistSearchInput.addEventListener("input", renderInconsistencias);
+elements.inconsistDateFromInput.addEventListener("change", loadInconsistMarks);
+elements.inconsistDateToInput.addEventListener("change", loadInconsistMarks);
+elements.reloadSinMarcaButton?.addEventListener("click", loadSinMarca);
+elements.exportSinMarcaButton?.addEventListener("click", exportSinMarcaToCsv);
+elements.sinMarcaSearchInput?.addEventListener("input", renderSinMarca);
+elements.sinMarcaDaysInput?.addEventListener("change", loadSinMarca);
+elements.sinMarcaMaxBioInput?.addEventListener("change", loadSinMarca);
+elements.reloadValidacionButton?.addEventListener("click", loadValidacionTurnos);
+elements.exportValidacionButton?.addEventListener("click", exportValidacionToCsv);
+elements.validacionSearchInput?.addEventListener("input", renderValidacion);
+elements.validacionFiltroTipo?.addEventListener("change", renderValidacion);
+elements.validacionResumen?.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-filtro]");
+  if (!chip) return;
+  elements.validacionFiltroTipo.value = chip.dataset.filtro;
+  renderValidacion();
+});
+elements.validacionDateFromInput?.addEventListener("change", loadValidacionTurnos);
+elements.validacionDateToInput?.addEventListener("change", loadValidacionTurnos);
+elements.validacionMaxHorasInput?.addEventListener("change", loadValidacionTurnos);
+elements.inconsistBody.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-del-mark]");
+  if (!button) return;
+  eliminarMarcaInconsistente({
+    id: button.dataset.delMark,
+    dni: button.dataset.dni,
+    fecha: button.dataset.fecha,
+    hora: button.dataset.hora,
+    sentido: button.dataset.sentido,
+    buk: button.dataset.buk
+  });
 });
 elements.enrollValidateButton.addEventListener("click", validateEnrollCollaborator);
 elements.enrollCameraButton.addEventListener("click", startEnrollCamera);

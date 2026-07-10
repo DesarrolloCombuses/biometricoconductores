@@ -9,6 +9,7 @@
   <title>Asistencia</title>
   <link rel="manifest" href="./manifest.json">
   <meta name="theme-color" content="#0a6b3b">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Asistencia">
@@ -21,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20260527-clock-resync">
+  <link rel="stylesheet" href="./asistencia.css?v=20260710-autologin-iframe">
 </head>
 <body>
   <main class="shell">
@@ -97,10 +98,20 @@
           Administración
           <span id="adminTabBadge" class="tab-badge hidden" aria-label="Turnos vencidos sin cerrar">0</span>
         </button>
+        <button id="manualExitTabButton" class="tab-button hidden" type="button">
+          <i data-lucide="log-out"></i>
+          Salida incapacidad
+        </button>
       </nav>
 
       <div id="registerPanel" class="register-layout">
         <form id="attendanceForm" class="panel form-panel">
+          <div class="tutorial-bar">
+            <button id="tutorialButton" class="tutorial-open" type="button">
+              <i data-lucide="help-circle"></i>
+              ¿Cómo marcar?
+            </button>
+          </div>
           <div class="step-list" aria-label="Proceso de registro">
             <div id="stepDni" class="step-item active">
               <span>1</span>
@@ -130,6 +141,8 @@
           <div id="collaboratorBox" class="result-box muted">
             Digita una cédula para validar si está activa.
           </div>
+
+          <div id="turnoStatusBanner" class="turno-status-banner hidden" role="status" aria-live="polite"></div>
 
           <div class="server-time-box">
             <label>
@@ -167,28 +180,29 @@
             <div id="attendanceDriverBox" class="result-box muted">
               Al validar la cédula del conductor se consultará Sonar y se preparará el vehículo para la asignación.
             </div>
-            <div class="location-box">
-              <div class="location-header">
-                <strong>Tu ubicación</strong>
-                <p id="locationStatus">Pendiente por validar coordenadas.</p>
-              </div>
-              <div id="locationMap" class="location-map" aria-label="Mapa con tu ubicación"></div>
-              <div id="locationPermissionHelp" class="location-help hidden">
-                <strong>No podemos acceder a tu ubicación</strong>
-                <p>Para registrar tu asistencia necesitamos confirmar dónde estás. Sigue estos pasos para habilitar el GPS:</p>
-                <ol>
-                  <li>Toca el <strong>candado</strong> o el ícono de información al lado de la dirección web (URL).</li>
-                  <li>Busca <strong>"Ubicación"</strong> y selecciona <strong>"Permitir"</strong>.</li>
-                  <li>Recarga la página (Ctrl+R) y vuelve a tocar "Activar ubicación".</li>
-                </ol>
-                <p class="muted">Si usas el celular, también revisa que el GPS esté encendido en los ajustes del teléfono.</p>
-              </div>
-              <button id="locationButton" class="secondary" type="button">
-                <i data-lucide="map-pin"></i>
-                Activar ubicación
-              </button>
-            </div>
           </div>
+
+          <section id="locationSection" class="location-box hidden">
+            <div class="location-header">
+              <strong>Ubicación <span class="location-required">(obligatoria)</span></strong>
+              <p id="locationStatus">Pendiente por validar coordenadas.</p>
+            </div>
+            <div id="locationMap" class="location-map" aria-label="Mapa con tu ubicación"></div>
+            <div id="locationPermissionHelp" class="location-help hidden">
+              <strong>No podemos acceder a tu ubicación</strong>
+              <p>La ubicación es obligatoria para registrar. Sigue estos pasos para habilitar el GPS:</p>
+              <ol>
+                <li>Toca el <strong>candado</strong> o el ícono de información al lado de la dirección web (URL).</li>
+                <li>Busca <strong>"Ubicación"</strong> y selecciona <strong>"Permitir"</strong>.</li>
+                <li>Recarga la página (Ctrl+R) y vuelve a tocar "Activar ubicación".</li>
+              </ol>
+              <p class="muted">Si usas el celular, también revisa que el GPS esté encendido en los ajustes del teléfono.</p>
+            </div>
+            <button id="locationButton" class="secondary" type="button">
+              <i data-lucide="map-pin"></i>
+              Activar ubicación
+            </button>
+          </section>
 
           <div id="markControls" class="hidden">
             <div id="nextMarkBox" class="next-mark-box">
@@ -210,6 +224,16 @@
             <label>
               Observación
               <textarea id="observacionInput" rows="3" placeholder="Opcional"></textarea>
+            </label>
+
+            <label class="comprobante-field">
+              Celular para comprobante por WhatsApp (opcional)
+              <input id="celularComprobanteInput" type="tel" inputmode="numeric"
+                     placeholder="Ej: 3001234567" maxlength="15" autocomplete="off">
+              <small class="comprobante-hint">
+                Si el conductor quiere recibir el comprobante de esta marca por WhatsApp,
+                digita su número. Déjalo vacío para no enviar nada.
+              </small>
             </label>
           </div>
 
@@ -375,6 +399,26 @@
             <i data-lucide="list-checks"></i>
             Marcas
           </button>
+          <button class="admin-subtab" type="button" data-admin-tab="jornadas" role="tab">
+            <i data-lucide="calendar-days"></i>
+            Ingresos y salidas
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="rechazos" role="tab">
+            <i data-lucide="circle-x"></i>
+            Rechazos Buk
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="inconsistencias" role="tab">
+            <i data-lucide="alert-triangle"></i>
+            Revisar registros
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="validacion" role="tab">
+            <i data-lucide="clipboard-check"></i>
+            Validación de turnos
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="sinmarca" role="tab">
+            <i data-lucide="user-x"></i>
+            Sin marca propia
+          </button>
           <button class="admin-subtab" type="button" data-admin-tab="rostros" role="tab">
             <i data-lucide="scan-face"></i>
             Rostros
@@ -408,7 +452,6 @@
                   <th>Cargo</th>
                   <th>Entrada</th>
                   <th>Tiempo abierto</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody id="overdueTurnsBody"></tbody>
@@ -455,7 +498,6 @@
                   <th>Cargo</th>
                   <th>Entrada</th>
                   <th>Tiempo abierto</th>
-                  <th></th>
                 </tr>
               </thead>
               <tbody id="openTurnsBody"></tbody>
@@ -496,35 +538,6 @@
             Eliminar rostro enrolado
           </button>
           <p id="enrollMessage" class="message" role="status"></p>
-        </form>
-        </div>
-
-        <div class="admin-subtab-content hidden" data-admin-content="marcas">
-        <form id="manualExitForm" class="panel form-panel">
-          <h2>Salida manual</h2>
-          <div class="field-row">
-            <label>
-              Cédula
-              <input id="manualDniInput" type="text" inputmode="numeric" autocomplete="off" required>
-            </label>
-            <label>
-              Fecha
-              <input id="manualDateInput" type="date" required>
-            </label>
-            <label>
-              Hora salida
-              <input id="manualTimeInput" type="time" required>
-            </label>
-          </div>
-          <label>
-            Motivo de la salida manual
-            <textarea id="manualReasonInput" rows="3" required placeholder="Explica por qué se registra manualmente"></textarea>
-          </label>
-          <button id="manualExitButton" class="primary wide" type="submit">
-            <i data-lucide="log-out"></i>
-            Registrar salida manual
-          </button>
-          <p id="manualMessage" class="message" role="status"></p>
         </form>
         </div>
 
@@ -635,6 +648,432 @@
           </div>
         </section>
         </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="jornadas">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Ingresos y salidas por fechas</h2>
+              <p id="journalStatus">Sin cargar</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="journalDateFromInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="journalDateToInput" type="date">
+              </label>
+              <label class="search-field">
+                Buscar
+                <input id="journalSearchInput" type="search" placeholder="Cédula o nombre">
+              </label>
+              <label class="search-field">
+                Cargo
+                <select id="journalCargoFilter" multiple size="4"></select>
+              </label>
+              <button id="reloadJournalButton" class="secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Actualizar
+              </button>
+              <button id="exportJournalButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Excel
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Cargo</th>
+                  <th>Entrada</th>
+                  <th>Salida</th>
+                  <th>Tiempo</th>
+                  <th>Buk</th>
+                </tr>
+              </thead>
+              <tbody id="journalBody"></tbody>
+            </table>
+          </div>
+          <div class="pagination-bar">
+            <button id="journalPrevPageButton" class="secondary" type="button">
+              <i data-lucide="chevron-left"></i>
+              Anterior
+            </button>
+            <span id="journalPageLabel">Página 1</span>
+            <button id="journalNextPageButton" class="secondary" type="button">
+              Siguiente
+              <i data-lucide="chevron-right"></i>
+            </button>
+          </div>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="rechazos">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Marcas rechazadas por Buk (no confirmadas)</h2>
+              <p id="rechazoStatus">Sin cargar</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="rechazoDateFromInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="rechazoDateToInput" type="date">
+              </label>
+              <label class="search-field">
+                Buscar
+                <input id="rechazoSearchInput" type="search" placeholder="Cédula o nombre">
+              </label>
+              <button id="reloadRechazoButton" class="secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Actualizar
+              </button>
+              <button id="exportRechazoButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Excel
+              </button>
+              <button id="resendAllRechazoButton" class="primary" type="button">
+                <i data-lucide="send"></i>
+                Reenviar todas
+              </button>
+            </div>
+          </div>
+          <p class="field-hint">
+            Aquí aparecen las marcas guardadas en la base pero que Buk/Ctrlit no confirmó (enviado_buk = false).
+            Corresponden a salidas manuales y salidas pendientes cuyo envío a Buk falló (por ejemplo, error 400).
+          </p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Hora</th>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Cargo</th>
+                  <th>Tipo</th>
+                  <th>Origen</th>
+                  <th>Estado Buk</th>
+                  <th>Observación</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody id="rechazoBody"></tbody>
+            </table>
+          </div>
+          <div class="pagination-bar">
+            <button id="rechazoPrevPageButton" class="secondary" type="button">
+              <i data-lucide="chevron-left"></i>
+              Anterior
+            </button>
+            <span id="rechazoPageLabel">Página 1</span>
+            <button id="rechazoNextPageButton" class="secondary" type="button">
+              Siguiente
+              <i data-lucide="chevron-right"></i>
+            </button>
+          </div>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="inconsistencias">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Revisar registros mal formados</h2>
+              <p id="inconsistStatus">Sin cargar</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="inconsistDateFromInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="inconsistDateToInput" type="date">
+              </label>
+              <label class="search-field">
+                Buscar
+                <input id="inconsistSearchInput" type="search" placeholder="Cédula o nombre">
+              </label>
+              <button id="reloadInconsistButton" class="secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Actualizar
+              </button>
+              <button id="exportInconsistButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Excel
+              </button>
+            </div>
+          </div>
+          <p class="field-hint">
+            Cada fila es una marca que rompe la secuencia entrada→salida. Revisa y, si es un error,
+            elimina la marca sobrante. Si la marca ya está en Buk, eliminarla aquí NO la borra de Buk.
+          </p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Cargo</th>
+                  <th>Problema</th>
+                  <th>Fecha</th>
+                  <th>Hora</th>
+                  <th>Tipo</th>
+                  <th>Antigüedad</th>
+                  <th>Origen</th>
+                  <th>Buk</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody id="inconsistBody"></tbody>
+            </table>
+          </div>
+          <p id="inconsistMessage" class="message" role="status"></p>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="validacion">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Validación de turnos</h2>
+              <p id="validacionStatus">Sin cargar</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="validacionDateFromInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="validacionDateToInput" type="date">
+              </label>
+              <label class="search-field">
+                Máx. horas
+                <input id="validacionMaxHorasInput" type="number" min="1" max="48" value="14">
+              </label>
+              <label class="search-field">
+                Buscar
+                <input id="validacionSearchInput" type="search" placeholder="Cédula o nombre">
+              </label>
+              <label class="search-field">
+                Validación
+                <select id="validacionFiltroTipo">
+                  <option value="todas">Todas</option>
+                  <option value="problemas">Solo con problemas</option>
+                  <option value="correcto">Correctas</option>
+                  <option value="abierto">Turno abierto</option>
+                  <option value="secuencia">Secuencia (doble / sin entrada)</option>
+                  <option value="doble">Doble entrada</option>
+                  <option value="salida_sin">Salida sin entrada</option>
+                  <option value="exceso">Exceso de horas</option>
+                  <option value="buk">Rechazo Buk</option>
+                </select>
+              </label>
+              <button id="reloadValidacionButton" class="secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Actualizar
+              </button>
+              <button id="exportValidacionButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Excel
+              </button>
+            </div>
+          </div>
+          <p class="field-hint">
+            Cada fila es una jornada (entrada → salida) desde el 8 de julio. La columna
+            <strong>Validación</strong> marca: turno abierto, doble entrada, salida sin entrada,
+            exceso de horas (según "Máx. horas") o rechazo de Buk. Verde = correcto.
+          </p>
+          <div id="validacionResumen" class="validacion-resumen"></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Cargo</th>
+                  <th>Jornada</th>
+                  <th>Entrada</th>
+                  <th>Salida</th>
+                  <th>Horas</th>
+                  <th>Buk</th>
+                  <th>Validación</th>
+                </tr>
+              </thead>
+              <tbody id="validacionBody"></tbody>
+            </table>
+          </div>
+          <p id="validacionMessage" class="message" role="status"></p>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="sinmarca">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Conductores sin marca propia</h2>
+              <p id="sinMarcaStatus">Sin cargar</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Días
+                <input id="sinMarcaDaysInput" type="number" min="1" max="365" value="90">
+              </label>
+              <label class="search-field">
+                Máx. propias
+                <input id="sinMarcaMaxBioInput" type="number" min="0" max="20" value="1">
+              </label>
+              <label class="search-field">
+                Buscar
+                <input id="sinMarcaSearchInput" type="search" placeholder="Cédula o nombre">
+              </label>
+              <button id="reloadSinMarcaButton" class="secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Actualizar
+              </button>
+              <button id="exportSinMarcaButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Excel
+              </button>
+            </div>
+          </div>
+          <p class="field-hint">
+            Conductores cuya asistencia registra casi siempre un administrador y que casi nunca marcan
+            ellos mismos de forma biométrica (web/móvil). Úsalo como lista de vigilancia: revisa uno por uno.
+            "Máx. propias" filtra por cuántas marcas biométricas propias se permiten (0 = ninguna).
+          </p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Cargo</th>
+                  <th>Total marcas</th>
+                  <th>Registradas por admin</th>
+                  <th>Biométricas propias</th>
+                  <th>% admin</th>
+                  <th>Última marca</th>
+                </tr>
+              </thead>
+              <tbody id="sinMarcaBody"></tbody>
+            </table>
+          </div>
+          <p id="sinMarcaMessage" class="message" role="status"></p>
+        </section>
+        </div>
+      </section>
+
+      <section id="manualExitPanel" class="hidden">
+        <form id="manualExitForm" class="panel form-panel">
+          <h2>Salida por incapacidad o ausencia</h2>
+          <p class="field-hint">
+            Uso exclusivo para colaboradores que NO pueden asistir al punto de registro biométrico
+            (incapacidad médica o ausencia justificada). Los turnos olvidados se cierran marcando
+            la salida biométrica en el punto, no aquí.
+          </p>
+          <div class="field-row">
+            <label>
+              Cédula
+              <input id="manualDniInput" type="text" inputmode="numeric" autocomplete="off" required>
+            </label>
+            <label>
+              Fecha
+              <input id="manualDateInput" type="date" required>
+            </label>
+            <label>
+              Hora salida
+              <input id="manualTimeInput" type="time" required>
+            </label>
+          </div>
+          <label>
+            Motivo
+            <select id="manualReasonCategory" required>
+              <option value="">Selecciona el motivo</option>
+              <option value="Incapacidad">Incapacidad médica</option>
+              <option value="Ausencia justificada">Ausencia justificada</option>
+              <option value="Otro">Otro (especificar)</option>
+            </select>
+          </label>
+          <label>
+            Detalle
+            <textarea id="manualReasonInput" rows="3" placeholder="Detalle del motivo (obligatorio si elige 'Otro')"></textarea>
+          </label>
+
+          <div class="manual-secure-block">
+            <h3>Autorización obligatoria</h3>
+            <p class="field-hint">
+              Para evitar fraudes, esta salida exige un <strong>código de autorización</strong>,
+              la <strong>ubicación</strong> de quien registra (se toma sola) y una <strong>foto (selfie)</strong>
+              del líder tomada <strong>en el momento con la cámara</strong> (no se pueden subir fotos del dispositivo).
+            </p>
+
+            <!-- Paso 1: código dinámico -->
+            <div class="manual-step">
+              <div class="manual-step-head"><span class="manual-step-num">1</span> Código de autorización</div>
+              <button id="manualCodeButton" class="secondary" type="button">
+                <i data-lucide="key-round"></i>
+                Solicitar código
+              </button>
+              <div id="manualCodeShown" class="manual-code-shown hidden"></div>
+              <label>
+                Escribe el código mostrado
+                <input id="manualCodeInput" type="text" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="6 dígitos" disabled>
+              </label>
+            </div>
+
+            <!-- Paso 2: ubicación (automática) -->
+            <div class="manual-step">
+              <div class="manual-step-head"><span class="manual-step-num">2</span> Ubicación de quien registra <span class="manual-step-auto">automática</span></div>
+              <button id="manualLocationButton" class="secondary hidden" type="button">
+                <i data-lucide="map-pin"></i>
+                Activar ubicación
+              </button>
+              <p id="manualLocationStatus" class="location-status">Ubicación obligatoria: se captura automáticamente.</p>
+            </div>
+
+            <!-- Paso 3: selfie del líder (la cámara se abre sola) -->
+            <div class="manual-step">
+              <div class="manual-step-head"><span class="manual-step-num">3</span> Foto del líder (selfie) <span class="manual-step-auto">la cámara se abre sola</span></div>
+              <button id="manualCameraButton" class="secondary" type="button">
+                <i data-lucide="camera"></i>
+                Abrir cámara
+              </button>
+              <div id="manualCameraBox" class="manual-camera-box hidden">
+                <video id="manualCameraVideo" playsinline autoplay muted></video>
+                <div class="manual-camera-actions">
+                  <button id="manualCaptureButton" class="primary" type="button">
+                    <i data-lucide="camera"></i>
+                    Tomar foto
+                  </button>
+                  <button id="manualCameraCancelButton" class="secondary" type="button">Cancelar</button>
+                </div>
+              </div>
+              <div id="manualPhotoPreview" class="manual-photo-preview hidden">
+                <img id="manualPhotoImg" alt="Selfie del líder">
+                <button id="manualPhotoRetakeButton" class="secondary" type="button">Repetir foto</button>
+              </div>
+            </div>
+          </div>
+
+          <button id="manualExitButton" class="primary wide" type="submit">
+            <i data-lucide="log-out"></i>
+            Registrar salida por incapacidad/ausencia
+          </button>
+          <p id="manualMessage" class="message" role="status"></p>
+        </form>
       </section>
     </section>
 
@@ -678,6 +1117,51 @@
       </div>
     </section>
 
+    <section id="registroSuccessOverlay" class="process-overlay hidden" aria-live="polite" aria-modal="true" role="dialog">
+      <div class="process-modal registro-success-modal">
+        <div id="registroSuccessIcon" class="registro-success-icon" aria-hidden="true">
+          <i data-lucide="check-circle-2"></i>
+        </div>
+        <strong id="registroSuccessTitle">Asistencia registrada</strong>
+        <p id="registroSuccessSubtitle" class="registro-success-subtitle"></p>
+        <div id="registroSuccessBody" class="registro-success-body"></div>
+        <button id="registroSuccessButton" class="primary wide" type="button">Entendido</button>
+      </div>
+    </section>
+
+    <section id="tutorialOverlay" class="process-overlay hidden" aria-modal="true" role="dialog" aria-labelledby="tutorialTitle">
+      <div class="process-modal tutorial-modal">
+        <button id="tutorialClose" class="tutorial-close" type="button" aria-label="Cerrar tutorial">
+          <i data-lucide="x"></i>
+        </button>
+        <div id="tutorialIcon" class="tutorial-icon" aria-hidden="true">
+          <i data-lucide="badge-check"></i>
+        </div>
+        <span id="tutorialStepNum" class="tutorial-step-num">Paso 1 de 5</span>
+        <strong id="tutorialTitle">Título del paso</strong>
+        <p id="tutorialText" class="tutorial-text">Descripción del paso.</p>
+        <div id="tutorialDots" class="tutorial-dots" aria-hidden="true"></div>
+        <div class="tutorial-actions">
+          <button id="tutorialPrev" class="secondary" type="button">Anterior</button>
+          <button id="tutorialNext" class="primary" type="button">Siguiente</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="adminClaveOverlay" class="process-overlay hidden" aria-modal="true" role="dialog" aria-labelledby="adminClaveTitle">
+      <div class="process-modal alert-modal">
+        <div class="tutorial-icon" aria-hidden="true"><i data-lucide="lock"></i></div>
+        <strong id="adminClaveTitle">Acceso restringido</strong>
+        <p>El panel de Administración está protegido. Digita la clave para continuar.</p>
+        <input id="adminClaveInput" type="password" class="admin-clave-input" placeholder="Clave" autocomplete="off" autocapitalize="off">
+        <p id="adminClaveError" class="admin-clave-error hidden">Clave incorrecta.</p>
+        <div class="confirm-actions">
+          <button id="adminClaveCancel" class="secondary" type="button">Cancelar</button>
+          <button id="adminClaveAccept" class="primary" type="button">Entrar</button>
+        </div>
+      </div>
+    </section>
+
     <div id="updateBanner" class="update-banner hidden" role="status">
       <span>Hay una nueva versi&oacute;n disponible.</span>
       <button id="updateBannerButton" class="primary" type="button">Actualizar</button>
@@ -712,39 +1196,13 @@
       </div>
     </section>
 
-    <section id="pendingExitOverlay" class="process-overlay hidden" aria-modal="true" role="dialog">
-      <form id="pendingExitForm" class="process-modal pending-exit-modal">
-        <strong>Cerrar entrada pendiente</strong>
-        <p id="pendingExitContext" class="pending-exit-context"></p>
-        <label class="pending-field">
-          Fecha real de salida
-          <input id="pendingExitDate" type="date" required>
-        </label>
-        <label class="pending-field">
-          Hora real de salida
-          <input id="pendingExitTime" type="time" required>
-        </label>
-        <label class="pending-field">
-          Motivo del registro manual
-          <textarea id="pendingExitReason" rows="3" required placeholder="Explica por qué la salida no se marcó a tiempo"></textarea>
-        </label>
-        <p class="pending-exit-help">
-          Esta salida se enviará a Buk/Ctrlit con la jornada del día de la entrada y se notificará a administración con el motivo.
-        </p>
-        <p id="pendingExitMessage" class="message" role="status"></p>
-        <div class="pending-exit-actions">
-          <button id="pendingExitCancel" class="secondary" type="button">Cancelar</button>
-          <button id="pendingExitSubmit" class="primary" type="submit">Registrar salida y enviar</button>
-        </div>
-      </form>
-    </section>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20260527-clock-resync"></script>
+  <script src="./asistencia.js?v=20260710-autologin-iframe"></script>
 </body>
 </html>
 
