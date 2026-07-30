@@ -1,4 +1,4 @@
-const APP_VERSION = "20260710-autologin-iframe";
+const APP_VERSION = "20260722f-mapa-marcas";
 const CACHE_NAME = `combuses-asistencia-${APP_VERSION}`;
 const APP_SHELL = [
   "./asistencia-web.html",

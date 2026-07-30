@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20260710-autologin-iframe">
+  <link rel="stylesheet" href="./asistencia.css?v=20260722f-mapa-marcas">
 </head>
 <body>
   <main class="shell">
@@ -89,9 +89,9 @@
           <i data-lucide="list-checks"></i>
           Mis registros
         </button>
-        <button id="databaseTabButton" class="tab-button hidden" type="button">
-          <i data-lucide="table-2"></i>
-          Base colaboradores
+        <button id="base3TabButton" class="tab-button" type="button">
+          <i data-lucide="ticket"></i>
+          Fichos Base 3
         </button>
         <button id="adminTabButton" class="tab-button hidden" type="button">
           <i data-lucide="shield-check"></i>
@@ -143,6 +143,8 @@
           </div>
 
           <div id="turnoStatusBanner" class="turno-status-banner hidden" role="status" aria-live="polite"></div>
+
+          <div id="programacionBanner" class="programacion-banner hidden" role="status" aria-live="polite"></div>
 
           <div class="server-time-box">
             <label>
@@ -230,6 +232,7 @@
               Celular para comprobante por WhatsApp (opcional)
               <input id="celularComprobanteInput" type="tel" inputmode="numeric"
                      placeholder="Ej: 3001234567" maxlength="15" autocomplete="off">
+              <small id="celularAgendaHint" class="comprobante-agenda hidden"></small>
               <small class="comprobante-hint">
                 Si el conductor quiere recibir el comprobante de esta marca por WhatsApp,
                 digita su número. Déjalo vacío para no enviar nada.
@@ -348,40 +351,34 @@
         </aside>
       </template>
 
-      <section id="databasePanel" class="panel database-panel hidden">
+      <section id="base3Panel" class="panel database-panel hidden">
         <div class="database-toolbar">
           <div>
-            <h2>Base de colaboradores</h2>
-            <p id="csvStatus">Sin cargar</p>
+            <h2>Fichos de salida · Base 3</h2>
+            <p id="base3Status">Terminal del Norte. Consulta los fichos por fecha.</p>
           </div>
           <div class="database-actions">
             <label class="search-field">
-              Buscar
-              <input id="csvSearchInput" type="search" placeholder="Cédula, nombre, ruta...">
+              Fecha
+              <input id="base3DateInput" type="date">
             </label>
-            <button id="reloadCsvButton" class="secondary" type="button">
-              <i data-lucide="refresh-cw"></i>
-              Actualizar
+            <button id="base3BuscarButton" class="primary" type="button">
+              <i data-lucide="search"></i>
+              Consultar
+            </button>
+            <button id="base3ExportButton" class="secondary" type="button">
+              <i data-lucide="download"></i>
+              Exportar CSV
             </button>
           </div>
         </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Cédula</th>
-                <th>Nombre</th>
-                <th>Estado</th>
-                <th>Cargo</th>
-                <th>Empresa</th>
-                <th>Vehículo</th>
-                <th>Ruta</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="csvTableBody"></tbody>
-          </table>
-        </div>
+        <p class="field-hint">
+          El ficho es el número de salida. Cada fila muestra el vehículo y sus horas:
+          <strong>Inicia</strong> (entrada turno 1), <strong>Inicia 2</strong> (relevo) y
+          <strong>Hora fin</strong> (fin turno 2).
+        </p>
+        <div id="base3Resultado" class="puntualidad-lista"></div>
+        <p id="base3Message" class="message" role="status"></p>
       </section>
 
       <section id="adminPanel" class="admin-panel hidden">
@@ -418,6 +415,30 @@
           <button class="admin-subtab" type="button" data-admin-tab="sinmarca" role="tab">
             <i data-lucide="user-x"></i>
             Sin marca propia
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="corregir" role="tab">
+            <i data-lucide="clock"></i>
+            Corregir horas
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="puntualidad" role="tab">
+            <i data-lucide="timer"></i>
+            Puntualidad
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="jornadas-anomalas" role="tab">
+            <i data-lucide="alert-triangle"></i>
+            Fuera de horario
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="horario" role="tab">
+            <i data-lucide="calendar-days"></i>
+            Horario
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="mapa" role="tab">
+            <i data-lucide="map-pin"></i>
+            Mapa de marcas
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="colaboradores" role="tab">
+            <i data-lucide="users"></i>
+            Colaboradores
           </button>
           <button class="admin-subtab" type="button" data-admin-tab="rostros" role="tab">
             <i data-lucide="scan-face"></i>
@@ -974,6 +995,258 @@
           <p id="sinMarcaMessage" class="message" role="status"></p>
         </section>
         </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="corregir">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Corregir horas de ingreso/salida</h2>
+              <p id="corregirStatus">Busca por cédula y fecha para ver las marcas de ese día.</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Cédula
+                <input id="corregirDniInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Cédula del conductor">
+              </label>
+              <label class="search-field">
+                Fecha
+                <input id="corregirDateInput" type="date">
+              </label>
+              <button id="corregirBuscarButton" class="primary" type="button">
+                <i data-lucide="search"></i>
+                Buscar
+              </button>
+            </div>
+          </div>
+          <p class="field-hint">
+            Corrige la hora de una marca ya registrada (solo en la base local; no toca Buk).
+            Cada cambio queda anotado en la observación de la marca para auditoría.
+          </p>
+          <div id="corregirResultado" class="corregir-lista"></div>
+          <p id="corregirMessage" class="message" role="status"></p>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="puntualidad">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Puntualidad frente a la programación</h2>
+              <p id="puntualidadStatus">Compara cada marca con el horario programado del conductor.</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="puntualidadDesdeInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="puntualidadHastaInput" type="date">
+              </label>
+              <label class="search-field">
+                Tolerancia (min)
+                <input id="puntualidadTolInput" type="number" min="0" max="120" step="5" value="15">
+              </label>
+              <button id="puntualidadBuscarButton" class="primary" type="button">
+                <i data-lucide="search"></i>
+                Consultar
+              </button>
+            </div>
+          </div>
+
+          <p class="field-hint">
+            Se cuenta como falta la <strong>entrada después de la hora programada</strong> y la
+            <strong>salida del turno 2 antes de HORA FIN</strong>. Llegar antes o salir después no es falta.
+            La <strong>salida del turno 1 no se evalúa</strong>: la programación no registra la hora
+            real de relevo entre conductores.
+          </p>
+
+          <div id="puntualidadTotales" class="puntualidad-totales"></div>
+          <div id="puntualidadResumen" class="puntualidad-lista"></div>
+
+          <details id="puntualidadDetalleBox" class="puntualidad-detalle hidden">
+            <summary>Ver evento por evento</summary>
+            <div id="puntualidadDetalle" class="puntualidad-lista"></div>
+          </details>
+
+          <p id="puntualidadMessage" class="message" role="status"></p>
+        </section>
+
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Nombres de la programación</h2>
+              <p id="puenteStatus">La programación trae nombres, no cédulas. Aquí se resuelve el cruce.</p>
+            </div>
+            <div class="database-actions">
+              <button id="puenteResolverButton" class="secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Resolver nombres
+              </button>
+            </div>
+          </div>
+          <div id="puenteResultado" class="puntualidad-lista"></div>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="jornadas-anomalas">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Jornadas fuera de horario</h2>
+              <p id="jornadasStatus">Detecta conductores que trabajaron fuera de su turno o con las marcas trocadas.</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="jornadasDesdeInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="jornadasHastaInput" type="date">
+              </label>
+              <button id="jornadasBuscarButton" class="primary" type="button">
+                <i data-lucide="search"></i>
+                Consultar
+              </button>
+            </div>
+          </div>
+
+          <p class="field-hint">
+            <strong>Sentido invertido:</strong> marcó salida donde iba entrada.
+            <strong>Turno cambiado:</strong> trabajó el turno del otro conductor del vehículo.
+            <strong>Fuera de ventana:</strong> entrada y salida corridas 3 h o más.
+            <strong>Sin cerrar / duración rara:</strong> nunca marcó salida, o la jornada
+            duró menos de 30 min o más de 16 h.
+          </p>
+
+          <div class="jornadas-filtros" id="jornadasFiltros"></div>
+          <div id="jornadasTotales" class="puntualidad-totales"></div>
+          <div id="jornadasResumen" class="puntualidad-lista"></div>
+
+          <details id="jornadasDetalleBox" class="puntualidad-detalle hidden">
+            <summary>Ver evento por evento</summary>
+            <div id="jornadasDetalle" class="puntualidad-lista"></div>
+          </details>
+
+          <p id="jornadasMessage" class="message" role="status"></p>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="horario">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Horario programado</h2>
+              <p id="horarioStatus">Consulta el turno programado de los conductores por fecha.</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="horarioDesdeInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="horarioHastaInput" type="date">
+              </label>
+              <label class="search-field">
+                Buscar
+                <input id="horarioBuscarInput" type="text" autocomplete="off"
+                       placeholder="Nombre, cédula, vehículo o base">
+              </label>
+              <button id="horarioBuscarButton" class="primary" type="button">
+                <i data-lucide="search"></i>
+                Consultar
+              </button>
+              <button id="horarioExportButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Exportar CSV
+              </button>
+            </div>
+          </div>
+          <p class="field-hint">
+            Turno 1: entrada y primer relevo. Turno 2: relevo y hora fin (puede cruzar la
+            medianoche). El horario viene de la programación cargada en el portal.
+          </p>
+          <div id="horarioResultado" class="puntualidad-lista"></div>
+          <p id="horarioMessage" class="message" role="status"></p>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="mapa">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Mapa de posiciones de las marcas</h2>
+              <p id="mapaStatus">Verifica dónde se hicieron los registros biométricos.</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="mapaDesdeInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="mapaHastaInput" type="date">
+              </label>
+              <label class="search-field">
+                Buscar
+                <input id="mapaBuscarInput" type="text" autocomplete="off"
+                       placeholder="Nombre, cédula o vehículo">
+              </label>
+              <button id="mapaBuscarButton" class="primary" type="button">
+                <i data-lucide="search"></i>
+                Ver en el mapa
+              </button>
+            </div>
+          </div>
+          <div class="mapa-leyenda">
+            <span><i class="mapa-dot mapa-dot-entrada"></i> Entrada</span>
+            <span><i class="mapa-dot mapa-dot-salida"></i> Salida</span>
+            <span class="field-hint">El círculo indica la precisión GPS reportada.</span>
+          </div>
+          <div id="mapaMarcas" class="mapa-marcas"></div>
+          <p id="mapaMessage" class="message" role="status"></p>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="colaboradores">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Base de colaboradores</h2>
+              <p id="csvStatus">Sin cargar</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Buscar
+                <input id="csvSearchInput" type="search" placeholder="Cédula, nombre, ruta...">
+              </label>
+              <button id="reloadCsvButton" class="secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Actualizar
+              </button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Estado</th>
+                  <th>Cargo</th>
+                  <th>Empresa</th>
+                  <th>Vehículo</th>
+                  <th>Ruta</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="csvTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+        </div>
       </section>
 
       <section id="manualExitPanel" class="hidden">
@@ -1202,7 +1475,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20260710-autologin-iframe"></script>
+  <script src="./asistencia.js?v=20260722f-mapa-marcas"></script>
 </body>
 </html>
 

@@ -783,6 +783,256 @@ svg {
   line-height: 1.3;
 }
 
+/* ---- Programacion de turnos en el registro ---- */
+.programacion-banner {
+  border: 1px solid #cfe3d6;
+  background: #f2f8f4;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 10px 0;
+  font-size: 0.88rem;
+}
+
+.programacion-banner.ok {
+  border-color: #a3cfbb;
+  background: #e8f5ee;
+}
+
+.programacion-banner.tarde {
+  border-color: #f0b9b9;
+  background: #fdecec;
+}
+
+.programacion-titulo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.programacion-titulo i {
+  width: 16px;
+  height: 16px;
+}
+
+.programacion-horas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--muted);
+}
+
+.programacion-estado {
+  margin-top: 6px;
+}
+
+/* ---- Administracion > Puntualidad ---- */
+.puntualidad-totales {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.punt-card {
+  flex: 1 1 130px;
+  border: 1px solid var(--border, #dcdcdc);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.punt-card span {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+
+.punt-card small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.punt-card.falta {
+  border-color: #f0b9b9;
+  background: #fdecec;
+}
+
+.punt-card.muted {
+  opacity: 0.7;
+}
+
+.puntualidad-lista {
+  overflow-x: auto;
+}
+
+.punt-tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.punt-tabla th,
+.punt-tabla td {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--border, #e6e6e6);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.punt-tabla th {
+  background: #f6f6f6;
+  font-weight: 700;
+}
+
+.punt-warn {
+  color: #b45309;
+}
+
+.punt-lista {
+  margin: 4px 0 12px 18px;
+  font-size: 0.85rem;
+}
+
+.puntualidad-detalle {
+  margin-top: 14px;
+}
+
+.puntualidad-detalle summary {
+  cursor: pointer;
+  font-weight: 700;
+  padding: 6px 0;
+}
+
+/* ---- Mapa de posiciones de las marcas ---- */
+.mapa-marcas {
+  width: 100%;
+  height: 60vh;
+  min-height: 360px;
+  border-radius: 12px;
+  border: 1px solid var(--border, #dcdcdc);
+  overflow: hidden;
+  z-index: 0;
+}
+
+.mapa-leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  margin: 8px 0;
+  font-size: 0.85rem;
+}
+
+.mapa-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid #fff;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.mapa-dot-entrada { background: #0a6b3b; }
+.mapa-dot-salida { background: #c2410c; }
+
+/* ---- Horario programado ---- */
+.turno-pill {
+  display: inline-block;
+  min-width: 30px;
+  text-align: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.turno-1 { background: #e0efff; color: #0b4a8a; }
+.turno-2 { background: #ffe8d6; color: #9a4a06; }
+
+.ficho-pill {
+  display: inline-block;
+  min-width: 34px;
+  text-align: center;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  background: var(--primary, #0a6b3b);
+  color: #fff;
+}
+
+/* ---- Jornadas fuera de horario ---- */
+.jornadas-filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.jornada-chip {
+  border: 1px solid var(--border, #dcdcdc);
+  background: #fff;
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--text, #222);
+}
+
+.jornada-chip span {
+  font-weight: 800;
+  margin-left: 4px;
+}
+
+.jornada-chip.activo {
+  background: var(--primary, #0a6b3b);
+  color: #fff;
+  border-color: var(--primary, #0a6b3b);
+}
+
+.jornada-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.jt-invertido { background: #fdecec; color: #b00020; }
+.jt-turno     { background: #fff3cd; color: #664d03; }
+.jt-ventana   { background: #e7e0fb; color: #4b2ea8; }
+.jt-larga     { background: #e0efff; color: #0b4a8a; }
+.jt-corta     { background: #ffe8d6; color: #9a4a06; }
+.jt-sincerrar { background: #eee; color: #444; }
+
+/* ---- Agenda de celulares guardados por cedula ---- */
+.comprobante-agenda {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.comprobante-agenda.guardado {
+  color: #0f5132;
+  background: #d1e7dd;
+  border-color: #a3cfbb;
+}
+
+.comprobante-agenda.sin-guardar {
+  color: #664d03;
+  background: #fff3cd;
+  border-color: #ffe69c;
+}
+
+
 /* ---- Tutorial "¿Cómo marcar?" ---- */
 .tutorial-bar {
   display: flex;
@@ -912,6 +1162,64 @@ svg {
   font-weight: 700;
   font-size: 0.9rem;
   margin: 0;
+}
+
+/* Corregir horas: filas editables */
+.corregir-lista {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.corregir-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft, #f1f5f3);
+}
+
+.corregir-campos {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+}
+
+.corregir-campos label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.corregir-campos input,
+.corregir-campos select {
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  background: #fff;
+}
+
+.corregir-campos .corregir-vehiculo { width: 110px; }
+
+.corregir-acciones {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.corregir-origen {
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 /* TEMPORAL (pruebas): botón eliminar marca en el panel admin. */

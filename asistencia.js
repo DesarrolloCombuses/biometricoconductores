@@ -69,6 +69,27 @@ const state = {
   user: null,
   colaborador: null,
   csvCandidate: null,
+  // Agenda de celulares para el comprobante por WhatsApp (tabla contactos_whatsapp).
+  celularAgendaDni: "",
+  celularAgendaGuardado: "",
+  celularAgendaPreguntado: "",
+  celularAgendaPreguntando: false,
+  // Programacion de turnos del dia (tabla programacion_turnos vía RPC).
+  programacionHoy: null,
+  programacionAvisoVehiculo: "",
+  puntualidadLoaded: false,
+  jornadasLoaded: false,
+  jornadasData: null,
+  jornadasFiltro: "",
+  horarioLoaded: false,
+  horarioFilas: [],
+  base3Loaded: false,
+  base3Filas: [],
+  mapaLoaded: false,
+  mapaMap: null,
+  mapaLayer: null,
+  // Fecha de corte de las verificaciones: no se evalua nada anterior.
+  fechaCorteVerificacion: "2026-07-15",
   compressedFile: null,
   faceValidated: false,
   faceWarning: "",
@@ -145,7 +166,7 @@ const elements = {
   appView: $("#appView"),
   registerTabButton: $("#registerTabButton"),
   historyTabButton: $("#historyTabButton"),
-  databaseTabButton: $("#databaseTabButton"),
+  base3TabButton: $("#base3TabButton"),
   adminTabButton: $("#adminTabButton"),
   manualExitTabButton: $("#manualExitTabButton"),
   adminTabBadge: $("#adminTabBadge"),
@@ -158,7 +179,7 @@ const elements = {
   overdueDriversToastGo: $("#overdueDriversToastGo"),
   registerPanel: $("#registerPanel"),
   historyPanel: $("#historyPanel"),
-  databasePanel: $("#databasePanel"),
+  base3Panel: $("#base3Panel"),
   adminPanel: $("#adminPanel"),
   manualExitPanel: $("#manualExitPanel"),
   loginForm: $("#loginForm"),
@@ -195,6 +216,52 @@ const elements = {
   stepRegister: $("#stepRegister"),
   observacionInput: $("#observacionInput"),
   celularComprobanteInput: $("#celularComprobanteInput"),
+  celularAgendaHint: $("#celularAgendaHint"),
+  programacionBanner: $("#programacionBanner"),
+  puntualidadDesdeInput: $("#puntualidadDesdeInput"),
+  puntualidadHastaInput: $("#puntualidadHastaInput"),
+  puntualidadTolInput: $("#puntualidadTolInput"),
+  puntualidadBuscarButton: $("#puntualidadBuscarButton"),
+  puntualidadStatus: $("#puntualidadStatus"),
+  puntualidadTotales: $("#puntualidadTotales"),
+  puntualidadResumen: $("#puntualidadResumen"),
+  puntualidadDetalleBox: $("#puntualidadDetalleBox"),
+  puntualidadDetalle: $("#puntualidadDetalle"),
+  puntualidadMessage: $("#puntualidadMessage"),
+  puenteResolverButton: $("#puenteResolverButton"),
+  puenteStatus: $("#puenteStatus"),
+  puenteResultado: $("#puenteResultado"),
+  jornadasDesdeInput: $("#jornadasDesdeInput"),
+  jornadasHastaInput: $("#jornadasHastaInput"),
+  jornadasBuscarButton: $("#jornadasBuscarButton"),
+  jornadasStatus: $("#jornadasStatus"),
+  jornadasFiltros: $("#jornadasFiltros"),
+  jornadasTotales: $("#jornadasTotales"),
+  jornadasResumen: $("#jornadasResumen"),
+  jornadasDetalleBox: $("#jornadasDetalleBox"),
+  jornadasDetalle: $("#jornadasDetalle"),
+  jornadasMessage: $("#jornadasMessage"),
+  horarioDesdeInput: $("#horarioDesdeInput"),
+  horarioHastaInput: $("#horarioHastaInput"),
+  horarioBuscarInput: $("#horarioBuscarInput"),
+  horarioBuscarButton: $("#horarioBuscarButton"),
+  horarioExportButton: $("#horarioExportButton"),
+  horarioStatus: $("#horarioStatus"),
+  horarioResultado: $("#horarioResultado"),
+  horarioMessage: $("#horarioMessage"),
+  base3DateInput: $("#base3DateInput"),
+  base3BuscarButton: $("#base3BuscarButton"),
+  base3ExportButton: $("#base3ExportButton"),
+  base3Status: $("#base3Status"),
+  base3Resultado: $("#base3Resultado"),
+  base3Message: $("#base3Message"),
+  mapaDesdeInput: $("#mapaDesdeInput"),
+  mapaHastaInput: $("#mapaHastaInput"),
+  mapaBuscarInput: $("#mapaBuscarInput"),
+  mapaBuscarButton: $("#mapaBuscarButton"),
+  mapaStatus: $("#mapaStatus"),
+  mapaMarcas: $("#mapaMarcas"),
+  mapaMessage: $("#mapaMessage"),
   tutorialButton: $("#tutorialButton"),
   tutorialOverlay: $("#tutorialOverlay"),
   tutorialClose: $("#tutorialClose"),
@@ -360,6 +427,12 @@ const elements = {
   exportSinMarcaButton: $("#exportSinMarcaButton"),
   sinMarcaBody: $("#sinMarcaBody"),
   sinMarcaMessage: $("#sinMarcaMessage"),
+  corregirDniInput: $("#corregirDniInput"),
+  corregirDateInput: $("#corregirDateInput"),
+  corregirBuscarButton: $("#corregirBuscarButton"),
+  corregirStatus: $("#corregirStatus"),
+  corregirResultado: $("#corregirResultado"),
+  corregirMessage: $("#corregirMessage"),
   validacionStatus: $("#validacionStatus"),
   validacionDateFromInput: $("#validacionDateFromInput"),
   validacionDateToInput: $("#validacionDateToInput"),
@@ -631,21 +704,40 @@ function getTrustedNowParts() {
   return getTodayPartsFromDate(trusted);
 }
 
+// Solo en entorno LOCAL (localhost / archivo) se permite editar la fecha/hora del
+// registro, para pruebas. En produccion la hora siempre viene del servidor.
+function isLocalEnv() {
+  return ["localhost", "127.0.0.1", "0.0.0.0", ""].includes(location.hostname);
+}
+
 function renderServerClock() {
   const now = getTrustedNowParts();
-  elements.reportDateInput.value = now.date;
-  elements.reportTimeInput.value = now.time.slice(0, 5);
+  // En local, si el usuario ya edito manualmente el campo, no lo pisamos con el reloj.
+  if (!(isLocalEnv() && state.reportDateTouched)) elements.reportDateInput.value = now.date;
+  if (!(isLocalEnv() && state.reportTimeTouched)) elements.reportTimeInput.value = now.time.slice(0, 5);
 }
 
 function configureReportTimeControls() {
-  elements.reportDateInput.disabled = true;
-  elements.reportTimeInput.disabled = true;
-  elements.reportDateInput.readOnly = true;
-  elements.reportTimeInput.readOnly = true;
-  elements.reportTimeHint.textContent = "La fecha y hora vienen del servidor y no se pueden modificar.";
+  const local = isLocalEnv();
+  elements.reportDateInput.disabled = !local ? true : false;
+  elements.reportTimeInput.disabled = !local ? true : false;
+  elements.reportDateInput.readOnly = !local;
+  elements.reportTimeInput.readOnly = !local;
+  elements.reportTimeHint.textContent = local
+    ? "MODO LOCAL: puedes modificar la fecha y hora para pruebas. En producción vienen del servidor."
+    : "La fecha y hora vienen del servidor y no se pueden modificar.";
 }
 
 function getReportParts() {
+  // En local, si el usuario edito la fecha/hora, usamos esos valores (para pruebas).
+  if (isLocalEnv() && (state.reportDateTouched || state.reportTimeTouched)
+      && elements.reportDateInput.value && elements.reportTimeInput.value) {
+    const date = elements.reportDateInput.value;
+    const t = elements.reportTimeInput.value;
+    const time = t.length === 5 ? `${t}:00` : t;
+    const [year, month, day] = date.split("-");
+    return { year, month, day, date, time };
+  }
   const now = getTrustedNowParts();
   const date = now.date;
   const time = now.time;
@@ -808,14 +900,13 @@ function applyTabVisibility() {
   const mostrarAdmin = state.isAdmin && !esMovil;
 
   elements.adminTabButton.classList.toggle("hidden", !mostrarAdmin);
-  elements.databaseTabButton.classList.toggle("hidden", !mostrarAdmin);
   elements.manualExitTabButton?.classList.toggle("hidden", !mostrarAdmin);
 
   // Si el usuario esta en una pestaña de admin que ya no debe verse, volver a Registro.
+  // (La Base de colaboradores ahora vive dentro del panel de Administración.)
   if (!mostrarAdmin && state.user) {
     const enPanelAdmin =
       !elements.adminPanel.classList.contains("hidden") ||
-      !elements.databasePanel.classList.contains("hidden") ||
       (elements.manualExitPanel && !elements.manualExitPanel.classList.contains("hidden"));
     if (enPanelAdmin) showTab("register");
   }
@@ -853,8 +944,810 @@ function updateOverdueBadge(count) {
   });
 }
 
+// ---- Corregir horas de ingreso/salida (subpestaña admin) ----
+async function buscarCorregir() {
+  const dni = normalizeDni(elements.corregirDniInput.value);
+  const fecha = (elements.corregirDateInput.value || "").trim();
+  setMessage(elements.corregirMessage, "");
+  if (!dni || !fecha) {
+    setMessage(elements.corregirMessage, "Digita la cédula y la fecha.", "error");
+    return;
+  }
+  if (!requireOnline(elements.corregirStatus)) return;
+
+  elements.corregirStatus.textContent = "Buscando marcas...";
+  elements.corregirResultado.innerHTML = "";
+
+  const { data: colab, error: eColab } = await supabaseClient
+    .from("colaboradores").select("id,nombre").eq("dni", dni).maybeSingle();
+  if (eColab || !colab) {
+    elements.corregirStatus.textContent = "No se encontró un colaborador con esa cédula.";
+    return;
+  }
+
+  const { data, error } = await supabaseClient
+    .from("asistencias")
+    .select("id,fecha,hora,sentido,origen,enviado_buk,vehiculo_reporte")
+    .eq("colaborador_id", colab.id)
+    .eq("fecha", fecha)
+    .order("hora", { ascending: true });
+
+  if (error) {
+    elements.corregirStatus.textContent = "No se pudieron cargar las marcas.";
+    setMessage(elements.corregirMessage, error.message || "Error consultando.", "error");
+    return;
+  }
+  state.corregirRows = data || [];
+  state.corregirNombre = colab.nombre || "";
+  renderCorregir();
+}
+
+function renderCorregir() {
+  const rows = state.corregirRows || [];
+  if (!rows.length) {
+    elements.corregirStatus.textContent = `Sin marcas para ${state.corregirNombre || "ese conductor"} en esa fecha.`;
+    elements.corregirResultado.innerHTML = "";
+    return;
+  }
+  elements.corregirStatus.textContent = `${rows.length} marca(s) — ${state.corregirNombre}`;
+  elements.corregirResultado.innerHTML = rows.map((m) => {
+    const id = escapeHtml(String(m.id));
+    const buk = m.enviado_buk ? "Buk OK" : "pendiente Buk";
+    return `
+    <div class="corregir-row" data-id="${id}">
+      <div class="corregir-campos">
+        <label>Tipo
+          <select class="corregir-sentido">
+            <option value="entrada"${m.sentido === "entrada" ? " selected" : ""}>Entrada</option>
+            <option value="salida"${m.sentido === "salida" ? " selected" : ""}>Salida</option>
+          </select>
+        </label>
+        <label>Fecha
+          <input type="date" class="corregir-fecha" value="${escapeHtml(m.fecha)}">
+        </label>
+        <label>Hora
+          <input type="time" class="corregir-hora" value="${escapeHtml(String(m.hora).slice(0, 5))}" step="60">
+        </label>
+        <label>Vehículo
+          <input type="text" class="corregir-vehiculo" value="${escapeHtml(m.vehiculo_reporte || "")}" placeholder="Opcional">
+        </label>
+      </div>
+      <div class="corregir-acciones">
+        <span class="corregir-origen">${escapeHtml(m.origen || "")} · ${buk}</span>
+        <button type="button" class="mini-button corregir-guardar" data-id="${id}">Guardar</button>
+        <button type="button" class="mini-button danger corregir-borrar" data-id="${id}">Borrar</button>
+      </div>
+    </div>`;
+  }).join("");
+  renderIcons();
+}
+
+async function guardarCorreccionMarca(id) {
+  const rowEl = elements.corregirResultado.querySelector(`.corregir-row[data-id="${id}"]`);
+  if (!rowEl) return;
+  const sentido = rowEl.querySelector(".corregir-sentido").value;
+  const fecha = rowEl.querySelector(".corregir-fecha").value;
+  const hora = rowEl.querySelector(".corregir-hora").value;
+  const vehiculo = rowEl.querySelector(".corregir-vehiculo").value.trim();
+  if (!fecha || !hora) {
+    setMessage(elements.corregirMessage, "Fecha y hora son obligatorias.", "error");
+    return;
+  }
+  const horaFull = hora.length === 5 ? `${hora}:00` : hora;
+
+  const ok = await confirmGraphical(
+    "Guardar cambios",
+    `¿Guardar esta marca como ${sentido.toUpperCase()} el ${fecha} a las ${hora}? Se cambia solo en la base local (no en Buk).`,
+    "Sí, guardar", "Cancelar"
+  );
+  if (!ok) return;
+
+  const { data, error } = await supabaseClient.rpc("actualizar_marca_asistencia", {
+    p_id: id, p_fecha: fecha, p_hora: horaFull, p_sentido: sentido, p_vehiculo: vehiculo || null
+  });
+  if (error || !data?.ok) {
+    setMessage(elements.corregirMessage, `No se pudo guardar: ${error?.message || data?.error || "error"}`, "error");
+    return;
+  }
+  const row = (state.corregirRows || []).find((r) => r.id === id);
+  if (row) { row.fecha = fecha; row.hora = horaFull; row.sentido = sentido; row.vehiculo_reporte = vehiculo || null; }
+  setMessage(elements.corregirMessage, `✅ Marca actualizada (${sentido} ${fecha} ${hora}).`, "success");
+}
+
+async function borrarMarcaCorregir(id) {
+  const row = (state.corregirRows || []).find((r) => r.id === id);
+  const avisoBuk = row?.enviado_buk
+    ? " OJO: esta marca YA está en Buk; borrarla aquí NO la quita de Buk/nómina."
+    : "";
+  const ok = await confirmGraphical(
+    "Borrar marca",
+    `¿Seguro que quieres ELIMINAR esta marca? Esta acción no se puede deshacer.${avisoBuk}`,
+    "Sí, borrar", "Cancelar"
+  );
+  if (!ok) return;
+
+  const { data, error } = await supabaseClient.rpc("eliminar_asistencia", { p_id: id });
+  if (error || !data?.ok) {
+    setMessage(elements.corregirMessage, `No se pudo borrar: ${error?.message || data?.error || "error"}`, "error");
+    return;
+  }
+  state.corregirRows = (state.corregirRows || []).filter((r) => r.id !== id);
+  renderCorregir();
+  setMessage(elements.corregirMessage, "🗑 Marca eliminada.", "success");
+}
+
+/* ==========================================================================
+   Administracion > Puntualidad
+   ========================================================================== */
+
+function setupPuntualidadDefaults() {
+  if (!elements.puntualidadDesdeInput || elements.puntualidadDesdeInput.value) return;
+  const hoy = getTodayParts().date;
+  const desde = new Date(`${hoy}T00:00:00`);
+  desde.setDate(desde.getDate() - 29);
+  elements.puntualidadDesdeInput.value = desde.toISOString().slice(0, 10);
+  elements.puntualidadHastaInput.value = hoy;
+}
+
+async function cargarPuntualidad() {
+  const desde = elements.puntualidadDesdeInput?.value;
+  const hasta = elements.puntualidadHastaInput?.value;
+  const tolerancia = Number(elements.puntualidadTolInput?.value || PUNTUALIDAD_TOLERANCIA_MIN);
+
+  if (!desde || !hasta) {
+    setMessage(elements.puntualidadMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.puntualidadMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+
+  setBusy(elements.puntualidadBuscarButton, true);
+  setMessage(elements.puntualidadMessage, "");
+  elements.puntualidadStatus.textContent = "Consultando...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("reporte_puntualidad", {
+      p_desde: desde, p_hasta: hasta, p_tolerancia: tolerancia
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo generar el reporte.");
+
+    state.puntualidadLoaded = true;
+    renderPuntualidad(data);
+  } catch (e) {
+    elements.puntualidadStatus.textContent = "No se pudo consultar la puntualidad.";
+    setMessage(elements.puntualidadMessage, e?.message || "Error consultando puntualidad.", "error");
+  } finally {
+    setBusy(elements.puntualidadBuscarButton, false);
+  }
+}
+
+function renderPuntualidad(data) {
+  const t = data.totales || {};
+  const resumen = data.resumen || [];
+  const detalle = data.detalle || [];
+
+  elements.puntualidadStatus.textContent =
+    `${data.desde} a ${data.hasta} · tolerancia ${data.tolerancia} min`;
+
+  elements.puntualidadTotales.innerHTML = `
+    <div class="punt-card"><span>${t.conductores ?? 0}</span><small>conductores</small></div>
+    <div class="punt-card"><span>${t.evaluadas ?? 0}</span><small>marcas evaluadas</small></div>
+    <div class="punt-card falta"><span>${t.faltas ?? 0}</span><small>faltas</small></div>
+    <div class="punt-card muted"><span>${t.no_evaluables ?? 0}</span><small>no evaluables</small></div>
+  `;
+
+  if (!resumen.length) {
+    elements.puntualidadResumen.innerHTML =
+      `<p class="field-hint">Sin faltas en este rango con tolerancia de ${data.tolerancia} minutos.</p>`;
+    elements.puntualidadDetalleBox.classList.add("hidden");
+    return;
+  }
+
+  elements.puntualidadResumen.innerHTML = `
+    <table class="punt-tabla">
+      <thead><tr>
+        <th>Conductor</th><th>Cédula</th><th>Faltas</th>
+        <th>Entrada tarde</th><th>Salida temprana</th><th>Min. acumulados</th><th>Peor</th>
+      </tr></thead>
+      <tbody>
+        ${resumen.map((r) => `
+          <tr>
+            <td>${escapeHtml(r.nombre || "")}</td>
+            <td>${escapeHtml(r.dni || "")}</td>
+            <td><strong>${r.faltas}</strong></td>
+            <td>${r.entrada_tarde}</td>
+            <td>${r.salida_temprana}</td>
+            <td>${r.minutos_total}</td>
+            <td>${r.peor} min</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  `;
+
+  elements.puntualidadDetalleBox.classList.remove("hidden");
+  elements.puntualidadDetalle.innerHTML = `
+    <table class="punt-tabla">
+      <thead><tr>
+        <th>Fecha</th><th>Conductor</th><th>Tipo</th><th>Turno</th>
+        <th>Programado</th><th>Marcó</th><th>Diferencia</th><th>Vehículo</th>
+      </tr></thead>
+      <tbody>
+        ${detalle.map((d) => `
+          <tr>
+            <td>${escapeHtml(d.fecha || "")}</td>
+            <td>${escapeHtml(d.nombre || "")}</td>
+            <td>${d.tipo === "salida_temprana" ? "Salió antes" : "Llegó tarde"}</td>
+            <td>${d.turno ?? ""}</td>
+            <td>${escapeHtml(d.hora_programada || "")}</td>
+            <td>${escapeHtml(d.hora || "")}</td>
+            <td><strong>${d.minutos} min</strong></td>
+            <td>${escapeHtml(d.vehiculo || "")}${
+              d.vehiculo_programado && !String(d.vehiculo || "").includes(d.vehiculo_programado)
+                ? ` <span class="punt-warn">(prog. ${escapeHtml(d.vehiculo_programado)})</span>` : ""}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+// Estado del cruce nombre de la programacion -> cedula.
+async function cargarEstadoPuente() {
+  if (!elements.puenteResultado) return;
+  try {
+    const { data, error } = await supabaseClient
+      .from("programacion_conductor_dni")
+      .select("nombre_programacion,nombre_colaborador,dni,metodo,similitud")
+      .order("metodo");
+    if (error) throw error;
+
+    const total = data.length;
+    const sinCruce = data.filter((r) => !r.dni && r.metodo !== "ignorado");
+    const parecidos = data.filter((r) => r.metodo === "parecido");
+
+    elements.puenteStatus.textContent =
+      `${total - sinCruce.length} de ${total} nombres resueltos.`;
+
+    if (!sinCruce.length && !parecidos.length) {
+      elements.puenteResultado.innerHTML =
+        `<p class="field-hint">Todos los nombres de la programación están cruzados con una cédula.</p>`;
+      return;
+    }
+
+    elements.puenteResultado.innerHTML = `
+      ${sinCruce.length ? `
+        <p class="punt-warn"><strong>${sinCruce.length} sin cruce</strong> — sus marcas no se comparan
+        contra la programación:</p>
+        <ul class="punt-lista">${sinCruce.map((r) =>
+          `<li>${escapeHtml(r.nombre_programacion)}</li>`).join("")}</ul>` : ""}
+      ${parecidos.length ? `
+        <p class="punt-warn"><strong>${parecidos.length} cruzados por parecido</strong> — verifica que
+        estén bien:</p>
+        <ul class="punt-lista">${parecidos.map((r) =>
+          `<li>${escapeHtml(r.nombre_programacion)} → ${escapeHtml(r.nombre_colaborador || "")}
+           (${escapeHtml(r.dni || "")}) · ${Math.round((r.similitud || 0) * 100)}%</li>`).join("")}</ul>` : ""}
+    `;
+  } catch (e) {
+    elements.puenteStatus.textContent = "No se pudo consultar el cruce de nombres.";
+  }
+}
+
+// Vuelve a intentar el cruce usando el CSV de colaboradores (la fuente real).
+async function resolverNombresProgramacion() {
+  setBusy(elements.puenteResolverButton, true);
+  try {
+    await ensureCsvLoaded();
+    const personas = state.csvRows
+      .map((r) => ({ dni: normalizeDni(r.cedula), nombre: r.nombre }))
+      .filter((p) => p.dni && p.nombre);
+
+    const { data, error } = await supabaseClient.rpc("sincronizar_nombres_programacion", {
+      p_personas: personas
+    });
+    if (error) throw error;
+
+    setMessage(elements.puntualidadMessage,
+      `Nombres resueltos: ${data.exacto} exactos, ${data.orden} por orden, ${data.parecido} por parecido. `
+      + `Quedan ${data.sin_resolver} sin resolver.`, "success");
+    await cargarEstadoPuente();
+  } catch (e) {
+    setMessage(elements.puntualidadMessage, e?.message || "No se pudo resolver los nombres.", "error");
+  } finally {
+    setBusy(elements.puenteResolverButton, false);
+  }
+}
+
+/* ==========================================================================
+   Administracion > Fuera de horario (jornadas anomalas)
+   ========================================================================== */
+
+const JORNADA_TIPOS = {
+  sentido_invertido: { etiqueta: "Sentido invertido", clase: "jt-invertido" },
+  turno_cambiado:    { etiqueta: "Turno cambiado", clase: "jt-turno" },
+  fuera_ventana:     { etiqueta: "Fuera de ventana", clase: "jt-ventana" },
+  jornada_larga:     { etiqueta: "Jornada larga", clase: "jt-larga" },
+  muy_corta:         { etiqueta: "Muy corta", clase: "jt-corta" },
+  sin_cerrar:        { etiqueta: "Sin cerrar", clase: "jt-sincerrar" }
+};
+
+function setupJornadasDefaults() {
+  if (!elements.jornadasDesdeInput || elements.jornadasDesdeInput.value) return;
+  const hoy = getTodayParts().date;
+  const corte = state.fechaCorteVerificacion;
+  // Arranca en la fecha de corte (no se verifica nada anterior).
+  const desde = new Date(`${hoy}T00:00:00`);
+  desde.setDate(desde.getDate() - 29);
+  let desdeStr = desde.toISOString().slice(0, 10);
+  if (desdeStr < corte) desdeStr = corte;
+  elements.jornadasDesdeInput.value = desdeStr;
+  elements.jornadasHastaInput.value = hoy;
+  elements.jornadasDesdeInput.min = corte;
+  elements.jornadasHastaInput.min = corte;
+}
+
+async function cargarJornadasAnomalas() {
+  const desde = elements.jornadasDesdeInput?.value;
+  const hasta = elements.jornadasHastaInput?.value;
+  if (!desde || !hasta) {
+    setMessage(elements.jornadasMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.jornadasMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+
+  setBusy(elements.jornadasBuscarButton, true);
+  setMessage(elements.jornadasMessage, "");
+  elements.jornadasStatus.textContent = "Analizando jornadas...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("reporte_jornadas_anomalas", {
+      p_desde: desde, p_hasta: hasta
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo generar el reporte.");
+
+    state.jornadasLoaded = true;
+    state.jornadasData = data;
+    state.jornadasFiltro = "";
+    renderJornadasAnomalas();
+  } catch (e) {
+    elements.jornadasStatus.textContent = "No se pudo analizar las jornadas.";
+    setMessage(elements.jornadasMessage, e?.message || "Error consultando jornadas.", "error");
+  } finally {
+    setBusy(elements.jornadasBuscarButton, false);
+  }
+}
+
+function renderJornadasAnomalas() {
+  const data = state.jornadasData;
+  if (!data) return;
+  const t = data.totales || {};
+  const resumen = data.resumen || [];
+  let detalle = data.detalle || [];
+
+  elements.jornadasStatus.textContent =
+    `${data.desde} a ${data.hasta} · solo se verifica desde ${state.fechaCorteVerificacion}`;
+
+  // Chips de filtro por tipo.
+  const chips = [["", "Todas", t.eventos || 0]];
+  for (const [key, meta] of Object.entries(JORNADA_TIPOS)) {
+    if (t[key]) chips.push([key, meta.etiqueta, t[key]]);
+  }
+  elements.jornadasFiltros.innerHTML = chips.map(([key, label, n]) =>
+    `<button type="button" class="jornada-chip ${state.jornadasFiltro === key ? "activo" : ""}"
+       data-jornada-filtro="${key}">${label} <span>${n}</span></button>`).join("");
+
+  elements.jornadasTotales.innerHTML = `
+    <div class="punt-card"><span>${t.conductores ?? 0}</span><small>conductores</small></div>
+    <div class="punt-card falta"><span>${t.eventos ?? 0}</span><small>eventos</small></div>
+    <div class="punt-card"><span>${t.sentido_invertido ?? 0}</span><small>trocados</small></div>
+    <div class="punt-card"><span>${t.turno_cambiado ?? 0}</span><small>turno cambiado</small></div>
+  `;
+
+  if (!resumen.length) {
+    elements.jornadasResumen.innerHTML =
+      `<p class="field-hint">Sin jornadas anómalas en este rango. 👌</p>`;
+    elements.jornadasDetalleBox.classList.add("hidden");
+    return;
+  }
+
+  elements.jornadasResumen.innerHTML = `
+    <table class="punt-tabla">
+      <thead><tr>
+        <th>Conductor</th><th>Cédula</th><th>Total</th>
+        <th>Trocado</th><th>Turno camb.</th><th>Fuera vent.</th>
+        <th>Larga</th><th>Corta</th><th>Sin cerrar</th>
+      </tr></thead>
+      <tbody>
+        ${resumen.map((r) => `
+          <tr>
+            <td>${escapeHtml(r.nombre || "")}</td>
+            <td>${escapeHtml(r.dni || "")}</td>
+            <td><strong>${r.total}</strong></td>
+            <td>${r.sentido_invertido || ""}</td>
+            <td>${r.turno_cambiado || ""}</td>
+            <td>${r.fuera_ventana || ""}</td>
+            <td>${r.jornada_larga || ""}</td>
+            <td>${r.muy_corta || ""}</td>
+            <td>${r.sin_cerrar || ""}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  `;
+
+  if (state.jornadasFiltro) detalle = detalle.filter((d) => d.tipo === state.jornadasFiltro);
+
+  elements.jornadasDetalleBox.classList.remove("hidden");
+  elements.jornadasDetalle.innerHTML = `
+    <table class="punt-tabla">
+      <thead><tr>
+        <th>Fecha</th><th>Conductor</th><th>Tipo</th><th>Turno</th>
+        <th>Entrada</th><th>Salida</th><th>Programado</th><th>Detalle</th><th>Vehículo</th>
+      </tr></thead>
+      <tbody>
+        ${detalle.map((d) => {
+          const meta = JORNADA_TIPOS[d.tipo] || { etiqueta: d.tipo, clase: "" };
+          return `
+          <tr>
+            <td>${escapeHtml(d.fecha || "")}</td>
+            <td>${escapeHtml(d.nombre || "")}</td>
+            <td><span class="jornada-pill ${meta.clase}">${meta.etiqueta}</span></td>
+            <td>${d.turno ?? ""}</td>
+            <td>${escapeHtml(d.hora || "")}</td>
+            <td>${escapeHtml(d.hora_salida || "")}</td>
+            <td>${escapeHtml(d.hora_programada || "")}</td>
+            <td>${describirJornada(d)}</td>
+            <td>${escapeHtml(d.vehiculo || "")}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+// Frase corta que explica cada evento en lenguaje humano.
+function describirJornada(d) {
+  switch (d.tipo) {
+    case "sentido_invertido":
+      return "Marcó salida sin una entrada abierta";
+    case "sin_cerrar":
+      return "Entró pero no marcó salida";
+    case "muy_corta":
+      return d.horas != null ? `Jornada de ${d.horas} h` : "Jornada muy corta";
+    case "jornada_larga":
+      return d.horas != null ? `Jornada de ${d.horas} h` : "Jornada muy larga";
+    case "turno_cambiado":
+      return d.min_entrada != null
+        ? `Entró ${Math.abs(Math.round(d.min_entrada / 60 * 10) / 10)} h ${d.min_entrada > 0 ? "después" : "antes"} de su turno`
+        : "Trabajó el turno del otro conductor";
+    case "fuera_ventana":
+      return "Entrada y salida corridas 3 h o más";
+    default:
+      return "";
+  }
+}
+
+/* ==========================================================================
+   Administracion > Horario programado
+   ========================================================================== */
+
+function setupHorarioDefaults() {
+  if (!elements.horarioDesdeInput || elements.horarioDesdeInput.value) return;
+  const hoy = getTodayParts().date;
+  // Por defecto muestra el dia de hoy.
+  elements.horarioDesdeInput.value = hoy;
+  elements.horarioHastaInput.value = hoy;
+}
+
+async function cargarHorario() {
+  const desde = elements.horarioDesdeInput?.value;
+  const hasta = elements.horarioHastaInput?.value;
+  const buscar = elements.horarioBuscarInput?.value.trim() || null;
+
+  if (!desde || !hasta) {
+    setMessage(elements.horarioMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.horarioMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+
+  setBusy(elements.horarioBuscarButton, true);
+  setMessage(elements.horarioMessage, "");
+  elements.horarioStatus.textContent = "Consultando horario...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("horario_programado", {
+      p_desde: desde, p_hasta: hasta, p_buscar: buscar
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo consultar el horario.");
+
+    state.horarioLoaded = true;
+    state.horarioFilas = data.filas || [];
+    renderHorario(data);
+  } catch (e) {
+    elements.horarioStatus.textContent = "No se pudo consultar el horario.";
+    setMessage(elements.horarioMessage, e?.message || "Error consultando el horario.", "error");
+  } finally {
+    setBusy(elements.horarioBuscarButton, false);
+  }
+}
+
+function renderHorario(data) {
+  const filas = data.filas || [];
+  const rango = data.desde === data.hasta ? data.desde : `${data.desde} a ${data.hasta}`;
+  elements.horarioStatus.textContent =
+    `${rango} · ${data.total} turno(s)` + (data.mostrados < data.total ? ` (mostrando ${data.mostrados})` : "");
+
+  if (!filas.length) {
+    elements.horarioResultado.innerHTML =
+      `<p class="field-hint">No hay programación para ese rango o búsqueda.</p>`;
+    return;
+  }
+
+  const multiDia = data.desde !== data.hasta;
+  elements.horarioResultado.innerHTML = `
+    <table class="punt-tabla">
+      <thead><tr>
+        ${multiDia ? "<th>Fecha</th>" : ""}
+        <th>Turno</th><th>Conductor</th><th>Cédula</th>
+        <th>Entrada</th><th>Salida</th><th>Vehículo</th><th>Base</th><th>Puesto</th>
+      </tr></thead>
+      <tbody>
+        ${filas.map((f) => `
+          <tr>
+            ${multiDia ? `<td>${escapeHtml(f.fecha || "")}</td>` : ""}
+            <td><span class="turno-pill turno-${f.turno}">T${f.turno}</span></td>
+            <td>${escapeHtml(f.conductor || "")}</td>
+            <td>${escapeHtml(f.dni || "—")}</td>
+            <td><strong>${escapeHtml(f.entrada || "--:--")}</strong></td>
+            <td><strong>${escapeHtml(f.salida || "--:--")}</strong></td>
+            <td>${escapeHtml(f.vehiculo || "")}</td>
+            <td>${escapeHtml(f.base || "")}</td>
+            <td>${escapeHtml(f.puesto || "")}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function exportarHorarioCsv() {
+  const filas = state.horarioFilas;
+  if (!filas.length) {
+    setMessage(elements.horarioMessage, "Primero consulta un horario para exportar.", "error");
+    return;
+  }
+  const header = ["Fecha", "Turno", "Conductor", "Cedula", "Entrada", "Salida", "Vehiculo", "Base", "Puesto"];
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lineas = [header.join(";")];
+  filas.forEach((f) => {
+    lineas.push([f.fecha, `T${f.turno}`, f.conductor, f.dni, f.entrada, f.salida, f.vehiculo, f.base, f.puesto]
+      .map(esc).join(";"));
+  });
+  const blob = new Blob(["﻿" + lineas.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `horario_${elements.horarioDesdeInput.value}_${elements.horarioHastaInput.value}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ==========================================================================
+   Administracion > Mapa de posiciones de las marcas
+   Grafica donde se hizo cada registro biometrico (lat/lon de asistencias) para
+   verificar que las marcas se tomen en los puntos correctos.
+   ========================================================================== */
+
+function setupMapaDefaults() {
+  if (!elements.mapaDesdeInput || elements.mapaDesdeInput.value) return;
+  const hoy = getTodayParts().date;
+  elements.mapaDesdeInput.value = hoy;
+  elements.mapaHastaInput.value = hoy;
+}
+
+// Inicializa el mapa Leaflet una sola vez.
+function ensureMapaMap() {
+  if (state.mapaMap || typeof window.L === "undefined" || !elements.mapaMarcas) return state.mapaMap;
+  // Vista inicial: Medellin.
+  state.mapaMap = window.L.map(elements.mapaMarcas, { scrollWheelZoom: true }).setView([6.2442, -75.5812], 12);
+  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "© OpenStreetMap"
+  }).addTo(state.mapaMap);
+  state.mapaLayer = window.L.layerGroup().addTo(state.mapaMap);
+  return state.mapaMap;
+}
+
+async function cargarMapaMarcas() {
+  const desde = elements.mapaDesdeInput?.value;
+  const hasta = elements.mapaHastaInput?.value;
+  const buscar = elements.mapaBuscarInput?.value.trim() || null;
+
+  if (!desde || !hasta) {
+    setMessage(elements.mapaMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.mapaMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+  if (typeof window.L === "undefined") {
+    setMessage(elements.mapaMessage, "No se pudo cargar el mapa (Leaflet).", "error");
+    return;
+  }
+
+  setBusy(elements.mapaBuscarButton, true);
+  setMessage(elements.mapaMessage, "");
+  elements.mapaStatus.textContent = "Cargando marcas...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("marcas_con_ubicacion", {
+      p_desde: desde, p_hasta: hasta, p_buscar: buscar
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo cargar el mapa.");
+
+    state.mapaLoaded = true;
+    renderMapaMarcas(data);
+  } catch (e) {
+    elements.mapaStatus.textContent = "No se pudieron cargar las marcas.";
+    setMessage(elements.mapaMessage, e?.message || "Error cargando el mapa.", "error");
+  } finally {
+    setBusy(elements.mapaBuscarButton, false);
+  }
+}
+
+function renderMapaMarcas(data) {
+  ensureMapaMap();
+  if (!state.mapaMap) return;
+
+  state.mapaLayer.clearLayers();
+  const marcas = data.marcas || [];
+
+  const rango = data.desde === data.hasta ? data.desde : `${data.desde} a ${data.hasta}`;
+  elements.mapaStatus.textContent =
+    `${rango} · ${data.total} marca(s)` + (data.mostrados < data.total ? ` (mostrando ${data.mostrados})` : "");
+
+  if (!marcas.length) {
+    elements.mapaMessage.textContent = "";
+    setMessage(elements.mapaMessage, "No hay marcas con ubicación en ese rango.", "error");
+    setTimeout(() => state.mapaMap.invalidateSize(), 120);
+    return;
+  }
+
+  const puntos = [];
+  marcas.forEach((m) => {
+    const esEntrada = m.sentido === "entrada";
+    const color = esEntrada ? "#0a6b3b" : "#c2410c";
+    // Circulo de precision GPS (tenue).
+    if (m.precision > 0) {
+      window.L.circle([m.lat, m.lon], {
+        radius: m.precision, color, weight: 1, opacity: 0.25, fillOpacity: 0.05
+      }).addTo(state.mapaLayer);
+    }
+    const marker = window.L.circleMarker([m.lat, m.lon], {
+      radius: 6, color: "#fff", weight: 1, fillColor: color, fillOpacity: 0.9
+    }).addTo(state.mapaLayer);
+    marker.bindPopup(`
+      <strong>${escapeHtml(m.nombre || "")}</strong><br>
+      Cédula: ${escapeHtml(m.dni || "")}<br>
+      ${esEntrada ? "🟢 Entrada" : "🟠 Salida"} · ${escapeHtml(m.fecha)} ${escapeHtml(m.hora)}<br>
+      ${m.vehiculo ? `Vehículo: ${escapeHtml(m.vehiculo)}<br>` : ""}
+      Precisión: ${m.precision} m · Origen: ${escapeHtml(m.origen || "")}<br>
+      <a href="https://www.google.com/maps?q=${m.lat},${m.lon}" target="_blank" rel="noopener">Ver en Google Maps</a>
+    `);
+    puntos.push([m.lat, m.lon]);
+  });
+
+  // Ajusta el zoom para que se vean todas las marcas.
+  try {
+    state.mapaMap.fitBounds(window.L.latLngBounds(puntos).pad(0.15));
+  } catch (_) {}
+  setTimeout(() => state.mapaMap.invalidateSize(), 120);
+}
+
+/* ==========================================================================
+   Administracion > Fichos de salida Base 3
+   ========================================================================== */
+
+function setupBase3Defaults() {
+  if (!elements.base3DateInput || elements.base3DateInput.value) return;
+  elements.base3DateInput.value = getTodayParts().date;
+}
+
+async function cargarBase3() {
+  const fecha = elements.base3DateInput?.value;
+  if (!fecha) {
+    setMessage(elements.base3Message, "Selecciona una fecha.", "error");
+    return;
+  }
+
+  setBusy(elements.base3BuscarButton, true);
+  setMessage(elements.base3Message, "");
+  elements.base3Status.textContent = "Consultando fichos...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("horario_base3", { p_fecha: fecha });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo consultar los fichos.");
+
+    state.base3Loaded = true;
+    state.base3Filas = data.filas || [];
+    renderBase3(data);
+  } catch (e) {
+    elements.base3Status.textContent = "No se pudo consultar los fichos.";
+    setMessage(elements.base3Message, e?.message || "Error consultando los fichos.", "error");
+  } finally {
+    setBusy(elements.base3BuscarButton, false);
+  }
+}
+
+function renderBase3(data) {
+  const filas = data.filas || [];
+  elements.base3Status.textContent = `${data.fecha} · ${data.total} ficho(s) en Base 3`;
+
+  if (!filas.length) {
+    elements.base3Resultado.innerHTML =
+      `<p class="field-hint">No hay fichos programados en Base 3 para esa fecha.</p>`;
+    return;
+  }
+
+  elements.base3Resultado.innerHTML = `
+    <table class="punt-tabla">
+      <thead><tr>
+        <th>Ficho</th><th>Vehículo</th><th>Inicia</th><th>Inicia 2</th><th>Hora fin</th><th>Puesto</th>
+      </tr></thead>
+      <tbody>
+        ${filas.map((f) => `
+          <tr>
+            <td><span class="ficho-pill">${escapeHtml(f.ficho || "")}</span></td>
+            <td><strong>${escapeHtml(f.vehiculo || "")}</strong></td>
+            <td>${escapeHtml(f.inicia || "--:--")}</td>
+            <td>${escapeHtml(f.inicia2 || "--:--")}</td>
+            <td>${escapeHtml(f.hora_fin || "--:--")}</td>
+            <td>${escapeHtml(f.puesto || "")}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function exportarBase3Csv() {
+  const filas = state.base3Filas;
+  if (!filas.length) {
+    setMessage(elements.base3Message, "Primero consulta una fecha para exportar.", "error");
+    return;
+  }
+  const header = ["Ficho", "Vehiculo", "Inicia", "Inicia 2", "Hora fin", "Puesto"];
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lineas = [header.join(";")];
+  filas.forEach((f) => {
+    lineas.push([f.ficho, f.vehiculo, f.inicia, f.inicia2, f.hora_fin, f.puesto].map(esc).join(";"));
+  });
+  const blob = new Blob(["﻿" + lineas.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `fichos_base3_${elements.base3DateInput.value}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function showAdminSubtab(name) {
-  const valid = ["alerts", "abiertos", "marcas", "jornadas", "rechazos", "inconsistencias", "validacion", "sinmarca", "rostros", "sonar"];
+  const valid = ["alerts", "abiertos", "marcas", "jornadas", "rechazos", "inconsistencias", "validacion", "sinmarca", "corregir", "puntualidad", "jornadas-anomalas", "horario", "mapa", "colaboradores", "rostros", "sonar"];
   const target = valid.includes(name) ? name : "alerts";
   document.querySelectorAll("[data-admin-tab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.adminTab === target);
@@ -884,9 +1777,43 @@ function showAdminSubtab(name) {
     if (!state.sinMarcaLoaded) loadSinMarca();
   }
 
+  if (target === "puntualidad") {
+    setupPuntualidadDefaults();
+    if (!state.puntualidadLoaded) cargarPuntualidad();
+    cargarEstadoPuente();
+  }
+
+  if (target === "jornadas-anomalas") {
+    setupJornadasDefaults();
+    if (!state.jornadasLoaded) cargarJornadasAnomalas();
+  }
+
+  if (target === "horario") {
+    setupHorarioDefaults();
+    if (!state.horarioLoaded) cargarHorario();
+  }
+
+  if (target === "mapa") {
+    setupMapaDefaults();
+    // El mapa necesita el contenedor visible para calcular su tamaño.
+    setTimeout(() => {
+      ensureMapaMap();
+      state.mapaMap?.invalidateSize();
+      if (!state.mapaLoaded) cargarMapaMarcas();
+    }, 60);
+  }
+
+  if (target === "colaboradores" && !state.csvLoaded) {
+    loadCollaboratorsCsv();
+  }
+
   if (target === "validacion") {
     setupValidacionDefaults();
     if (!state.validacionLoaded) loadValidacionTurnos();
+  }
+
+  if (target === "corregir" && elements.corregirDateInput && !elements.corregirDateInput.value) {
+    elements.corregirDateInput.value = getTodayParts().date;
   }
 }
 
@@ -1039,24 +1966,24 @@ function showTab(tabName) {
   if (tabName === "admin" && !isAdminUnlocked()) {
     tabName = "register";
   }
-  const esTabAdmin = tabName === "database" || tabName === "admin" || tabName === "manualexit";
+  const esTabAdmin = tabName === "admin" || tabName === "manualexit";
   // Las pestañas de admin no estan disponibles si no es admin, o si esta en movil.
   if (esTabAdmin && (!state.isAdmin || state.deviceMode === "mobile")) {
     tabName = "register";
   }
 
   const isHistory = tabName === "history";
-  const isDatabase = tabName === "database";
+  const isBase3 = tabName === "base3";
   const isAdmin = tabName === "admin";
   const isManualExit = tabName === "manualexit";
-  elements.registerPanel.classList.toggle("hidden", isHistory || isDatabase || isAdmin || isManualExit);
+  elements.registerPanel.classList.toggle("hidden", isHistory || isBase3 || isAdmin || isManualExit);
   elements.historyPanel.classList.toggle("hidden", !isHistory);
-  elements.databasePanel.classList.toggle("hidden", !isDatabase);
+  elements.base3Panel?.classList.toggle("hidden", !isBase3);
   elements.adminPanel.classList.toggle("hidden", !isAdmin);
   elements.manualExitPanel?.classList.toggle("hidden", !isManualExit);
-  elements.registerTabButton.classList.toggle("active", !isHistory && !isDatabase && !isAdmin && !isManualExit);
+  elements.registerTabButton.classList.toggle("active", !isHistory && !isBase3 && !isAdmin && !isManualExit);
   elements.historyTabButton.classList.toggle("active", isHistory);
-  elements.databaseTabButton.classList.toggle("active", isDatabase);
+  elements.base3TabButton?.classList.toggle("active", isBase3);
   elements.adminTabButton.classList.toggle("active", isAdmin);
   elements.manualExitTabButton?.classList.toggle("active", isManualExit);
 
@@ -1075,8 +2002,9 @@ function showTab(tabName) {
     }
   }
 
-  if (isDatabase && !state.csvLoaded) {
-    loadCollaboratorsCsv();
+  if (isBase3) {
+    setupBase3Defaults();
+    if (!state.base3Loaded) cargarBase3();
   }
 
   if (isAdmin) {
@@ -1087,7 +2015,7 @@ function showTab(tabName) {
     loadOpenTurns();
   }
 
-  const isRegister = !isHistory && !isDatabase && !isAdmin && !isManualExit;
+  const isRegister = !isHistory && !isBase3 && !isAdmin && !isManualExit;
   if (isRegister) maybeShowTutorial();
 }
 
@@ -1294,6 +2222,334 @@ async function prepareAttendanceDriverIntegration(csvCollaborator, dni) {
   renderAttendanceDriverBox();
 }
 
+/* ==========================================================================
+   Programacion de turnos
+   La programacion (programacion_filas) trae el horario del conductor pero no su
+   cedula; el cruce nombre -> cedula lo resuelve la tabla programacion_conductor_dni
+   y queda materializado en programacion_turnos. Aqui solo se consume.
+
+   OJO con el criterio (calibrado contra 12.786 marcas reales):
+     - INICIA   -> hora de entrada del conductor 1. Confiable (dispersion 15 min).
+     - INICIA 2 -> hora de entrada del conductor 2. Es una HORA LIMITE, no la hora
+                   de relevo: casi todos llegan antes.
+     - HORA FIN -> hora de salida del conductor 2. Tambien hora limite.
+     - La SALIDA del conductor 1 NO se puede evaluar: la programacion no registra
+       la hora real del relevo.
+   ========================================================================== */
+
+const PUNTUALIDAD_TOLERANCIA_MIN = 15;
+
+function limpiarProgramacion() {
+  state.programacionHoy = null;
+  state.programacionAvisoVehiculo = "";
+  elements.programacionBanner?.classList.add("hidden");
+}
+
+// Devuelve el turno del dia que corresponde al sentido que se va a marcar.
+function turnoProgramadoActual() {
+  const turnos = state.programacionHoy?.turnos || [];
+  if (!turnos.length) return null;
+  if (turnos.length === 1) return turnos[0];
+  // Con dos turnos el mismo dia gana el mas cercano a la hora que se va a registrar.
+  const partes = getReportParts();
+  const minutosMarca = Number(partes.time.slice(0, 2)) * 60 + Number(partes.time.slice(3, 5));
+  const aMin = (hhmm) => {
+    if (!hhmm) return null;
+    return Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+  };
+  let mejor = turnos[0];
+  let mejorDist = Infinity;
+  for (const t of turnos) {
+    const ref = aMin(state.nextSentido === "salida" ? t.hora_salida : t.hora_entrada);
+    if (ref === null) continue;
+    const dist = Math.abs(minutosMarca - ref);
+    if (dist < mejorDist) { mejorDist = dist; mejor = t; }
+  }
+  return mejor;
+}
+
+function minutosDesdeProgramado(horaProgramada) {
+  if (!horaProgramada) return null;
+  const partes = getReportParts();
+  const marca = Number(partes.time.slice(0, 2)) * 60 + Number(partes.time.slice(3, 5));
+  const prog = Number(horaProgramada.slice(0, 2)) * 60 + Number(horaProgramada.slice(3, 5));
+  let dif = marca - prog;
+  // La jornada del turno 2 cruza la medianoche: 23:50 vs 00:05 son 15 min, no 1425.
+  if (dif > 720) dif -= 1440;
+  if (dif < -720) dif += 1440;
+  return dif;
+}
+
+function renderProgramacionBanner() {
+  const banner = elements.programacionBanner;
+  if (!banner) return;
+
+  const turno = turnoProgramadoActual();
+  if (!turno) {
+    banner.classList.add("hidden");
+    banner.innerHTML = "";
+    return;
+  }
+
+  const sentido = state.nextSentido || "entrada";
+  const horaRef = sentido === "salida" ? turno.hora_salida : turno.hora_entrada;
+  const dif = minutosDesdeProgramado(horaRef);
+  const evaluable = !(sentido === "salida" && turno.turno === 1);
+
+  let estado = "";
+  let clase = "programacion-banner";
+  if (horaRef && dif !== null && evaluable) {
+    if (sentido !== "salida" && dif > PUNTUALIDAD_TOLERANCIA_MIN) {
+      clase += " tarde";
+      estado = `Vas <strong>${dif} min tarde</strong> frente a la hora programada.`;
+    } else if (sentido === "salida" && dif < -PUNTUALIDAD_TOLERANCIA_MIN) {
+      clase += " tarde";
+      estado = `Estas saliendo <strong>${Math.abs(dif)} min antes</strong> de la hora fin.`;
+    } else if (Math.abs(dif) <= PUNTUALIDAD_TOLERANCIA_MIN) {
+      clase += " ok";
+      estado = "Vas <strong>a tiempo</strong>.";
+    } else {
+      clase += " ok";
+      estado = `Vas <strong>${Math.abs(dif)} min antes</strong> de la hora programada.`;
+    }
+  } else if (!evaluable) {
+    estado = "La salida del turno 1 no se compara: la programacion no registra la hora de relevo.";
+  }
+
+  banner.className = clase;
+  banner.innerHTML = `
+    <div class="programacion-titulo">
+      <i data-lucide="calendar-clock"></i>
+      Turno ${turno.turno} programado hoy
+    </div>
+    <div class="programacion-horas">
+      <span>Entrada <strong>${escapeHtml(turno.hora_entrada || "--:--")}</strong></span>
+      <span>Salida <strong>${escapeHtml(turno.hora_salida || "--:--")}</strong></span>
+      ${turno.vehiculo ? `<span>Vehiculo <strong>${escapeHtml(turno.vehiculo)}</strong></span>` : ""}
+      ${turno.base ? `<span>${escapeHtml(turno.base)}</span>` : ""}
+      ${turno.puesto ? `<span>${escapeHtml(turno.puesto)}</span>` : ""}
+    </div>
+    ${estado ? `<div class="programacion-estado">${estado}</div>` : ""}
+  `;
+  banner.classList.remove("hidden");
+  if (window.lucide?.createIcons) window.lucide.createIcons();
+}
+
+async function cargarProgramacionDia(dni) {
+  limpiarProgramacion();
+  if (!dni) return;
+
+  try {
+    const { data, error } = await supabaseClient.rpc("obtener_programacion_dia", {
+      p_dni: dni,
+      p_fecha: getReportParts().date
+    });
+    if (error) throw error;
+    if (!data?.ok || !data.existe) return;
+
+    state.programacionHoy = data;
+    autocompletarDesdeProgramacion();
+    renderProgramacionBanner();
+  } catch (e) {
+    console.warn("No se pudo consultar la programacion del dia:", e?.message || e);
+  }
+}
+
+// Llena vehiculo y base con lo programado, sin pisar lo que ya escribio el usuario.
+function autocompletarDesdeProgramacion() {
+  const turno = turnoProgramadoActual();
+  if (!turno || !state.isDriverCandidate) return;
+
+  if (turno.vehiculo && !elements.vehicleInput.value.trim()) {
+    selectVehicleFromCsv(turno.vehiculo);
+  }
+  if (turno.base && !elements.baseInput.value.trim()) {
+    elements.baseInput.value = turno.base;
+  }
+}
+
+// Aviso si el vehiculo seleccionado no es el programado. No bloquea: la operacion
+// cambia de vehiculo a diario y la programacion puede quedar desactualizada.
+async function confirmarVehiculoProgramado() {
+  const turno = turnoProgramadoActual();
+  const programado = String(turno?.vehiculo || "").trim();
+  if (!programado) return true;
+
+  const seleccionado = getSelectedVehicle();
+  const interno = String(seleccionado?.interno || "").trim();
+  if (!interno) return true;
+
+  const iguales = interno.replace(/[^\dA-Za-z]/g, "").toUpperCase()
+                === programado.replace(/[^\dA-Za-z]/g, "").toUpperCase();
+  if (iguales) return true;
+
+  // Solo se pregunta una vez por combinacion, para no repetir el modal.
+  const clave = `${interno}|${programado}`;
+  if (state.programacionAvisoVehiculo === clave) return true;
+  state.programacionAvisoVehiculo = clave;
+
+  // confirmGraphical usa textContent: aqui va texto plano, no HTML.
+  return confirmGraphical(
+    "Vehículo distinto al programado",
+    `La programación de hoy asigna el vehículo ${programado} a este conductor, `
+    + `pero seleccionaste el ${interno}. ¿Deseas registrar la marca así?`,
+    "Sí, registrar",
+    "Corregir vehículo"
+  );
+}
+
+/* ==========================================================================
+   Agenda de celulares para el comprobante por WhatsApp
+   Guarda el celular por cedula en la tabla `contactos_whatsapp`, para que al
+   digitar la cedula el numero aparezca solo y no haya que escribirlo cada vez.
+   ========================================================================== */
+
+// Misma normalizacion que normalizar_celular_co() en la base: 10 digitos, inicia en 3.
+function normalizarCelularCo(valor) {
+  let v = String(valor || "").replace(/[^0-9]/g, "");
+  if (v.length === 12 && v.startsWith("57")) v = v.slice(2);
+  else if (v.length === 11 && v.startsWith("0")) v = v.slice(1);
+  if (v.length !== 10 || !v.startsWith("3")) return "";
+  return v;
+}
+
+function enmascararCelular(cel) {
+  const v = String(cel || "");
+  if (v.length < 7) return v;
+  return `${v.slice(0, 3)}•••${v.slice(-4)}`;
+}
+
+function renderCelularAgenda() {
+  const hint = elements.celularAgendaHint;
+  if (!hint) return;
+
+  const dni = state.celularAgendaDni;
+  if (!dni) {
+    hint.classList.add("hidden");
+    return;
+  }
+
+  const guardado = state.celularAgendaGuardado;
+  hint.classList.remove("hidden");
+  if (guardado) {
+    hint.className = "comprobante-agenda guardado";
+    hint.textContent = `Numero guardado para esta cedula: ${enmascararCelular(guardado)}. Puedes cambiarlo si el conductor lo pide.`;
+  } else {
+    hint.className = "comprobante-agenda sin-guardar";
+    hint.textContent = "Esta cedula no tiene un numero guardado. Al digitarlo la aplicacion te preguntara si deseas guardarlo.";
+  }
+}
+
+function limpiarCelularAgenda() {
+  state.celularAgendaDni = "";
+  state.celularAgendaGuardado = "";
+  state.celularAgendaPreguntado = "";
+  if (elements.celularComprobanteInput) elements.celularComprobanteInput.value = "";
+  renderCelularAgenda();
+}
+
+// Pregunta (modal) si se guarda el numero en la agenda. Se dispara sola: al salir
+// del campo y, si no alcanzo a preguntarse, tambien al registrar la marca.
+// Devuelve true si ya se resolvio la pregunta para ese numero.
+async function preguntarGuardarCelular() {
+  if (state.celularAgendaPreguntando) return false;
+
+  const dni = state.celularAgendaDni;
+  const celular = normalizarCelularCo(elements.celularComprobanteInput?.value);
+  if (!dni || !celular) return false;
+  if (celular === state.celularAgendaGuardado) return true;
+  if (celular === state.celularAgendaPreguntado) return true;
+
+  state.celularAgendaPreguntando = true;
+  state.celularAgendaPreguntado = celular;
+  try {
+    const guardar = await confirmGraphical(
+      state.celularAgendaGuardado ? "¿Actualizar el número guardado?" : "¿Guardar este número?",
+      state.celularAgendaGuardado
+        ? `Esta cédula tenía guardado el número ${enmascararCelular(state.celularAgendaGuardado)}. ¿Deseas reemplazarlo por ${celular} para las próximas marcas?`
+        : `¿Deseas guardar el número ${celular} para esta cédula? Así aparecerá solo la próxima vez y no habrá que digitarlo.`,
+      "Sí, guardar",
+      "No, solo esta vez"
+    );
+    if (guardar) await guardarCelularAgenda({ silencioso: true });
+  } finally {
+    state.celularAgendaPreguntando = false;
+  }
+  return true;
+}
+
+async function cargarCelularAgenda(dni) {
+  // Si el numero visible era el autocompletado de OTRA cedula, se limpia para
+  // no arrastrar el celular de un conductor al siguiente.
+  const previo = state.celularAgendaGuardado;
+  if (previo && dni !== state.celularAgendaDni
+      && normalizarCelularCo(elements.celularComprobanteInput?.value) === previo) {
+    elements.celularComprobanteInput.value = "";
+  }
+
+  state.celularAgendaDni = dni || "";
+  state.celularAgendaGuardado = "";
+  state.celularAgendaPreguntado = "";
+  if (!dni) {
+    renderCelularAgenda();
+    return;
+  }
+
+  try {
+    const { data, error } = await supabaseClient.rpc("obtener_celular_colaborador", { p_dni: dni });
+    if (error) throw error;
+    if (data?.ok && data.existe && data.celular) {
+      state.celularAgendaGuardado = String(data.celular);
+      // Se autocompleta solo si el usuario no escribio otro numero a mano.
+      const actual = normalizarCelularCo(elements.celularComprobanteInput?.value);
+      if (!actual && elements.celularComprobanteInput) {
+        elements.celularComprobanteInput.value = state.celularAgendaGuardado;
+      }
+    }
+  } catch (e) {
+    console.warn("No se pudo consultar la agenda de celulares:", e?.message || e);
+  }
+  renderCelularAgenda();
+}
+
+async function guardarCelularAgenda({ silencioso = false } = {}) {
+  const dni = state.celularAgendaDni || normalizeDni(elements.dniInput.value);
+  const celular = normalizarCelularCo(elements.celularComprobanteInput?.value);
+
+  if (!dni) {
+    if (!silencioso) setMessage(elements.formMessage, "Primero valida la cedula.", "error");
+    return false;
+  }
+  if (!celular) {
+    if (!silencioso) {
+      setMessage(elements.formMessage, "El celular debe tener 10 digitos y empezar por 3.", "error");
+      elements.celularComprobanteInput?.focus();
+    }
+    return false;
+  }
+
+  try {
+    const { data, error } = await supabaseClient.rpc("guardar_celular_colaborador", {
+      p_dni: dni,
+      p_celular: celular,
+      p_nombre: state.csvCandidate?.nombre || state.colaborador?.nombre || null
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo guardar el numero.");
+
+    state.celularAgendaDni = dni;
+    state.celularAgendaGuardado = celular;
+    state.celularAgendaPreguntado = celular;
+    if (elements.celularComprobanteInput) elements.celularComprobanteInput.value = celular;
+    renderCelularAgenda();
+    if (!silencioso) setMessage(elements.formMessage, "Numero guardado para esta cedula.", "success");
+    return true;
+  } catch (e) {
+    if (!silencioso) setMessage(elements.formMessage, e?.message || "No se pudo guardar el numero.", "error");
+    return false;
+  }
+}
+
 function scheduleDniValidation() {
   if (!requireOnline()) return;
   window.clearTimeout(state.dniValidationTimer);
@@ -1304,6 +2560,8 @@ function scheduleDniValidation() {
   if (!dni) {
     elements.collaboratorBox.className = "result-box muted";
     elements.collaboratorBox.textContent = "Digita una cedula para validar si esta activa.";
+    limpiarCelularAgenda();
+    limpiarProgramacion();
     return;
   }
 
@@ -1323,6 +2581,8 @@ async function buscarColaborador() {
   if (!dni) {
     elements.collaboratorBox.className = "result-box muted";
     elements.collaboratorBox.textContent = "Digita una cedula para validar si esta activa.";
+    limpiarCelularAgenda();
+    limpiarProgramacion();
     stopCamera();
     return;
   }
@@ -1339,6 +2599,7 @@ async function buscarColaborador() {
 
   state.csvCandidate = csvCollaborator;
   configureDriverFields(csvCollaborator);
+  cargarCelularAgenda(dni);
   if (isDriverCollaborator(csvCollaborator)) {
     await prepareAttendanceDriverIntegration(csvCollaborator, dni);
   }
@@ -1367,6 +2628,7 @@ async function buscarColaborador() {
   computeOpenEntrada();
   state.nextSentido = state.openEntrada ? "salida" : "entrada";
   renderSentidoSelector();
+  await cargarProgramacionDia(dni);
   const faceStatus = state.isDriverCandidate
     ? (data?.rostro_enrolado ? "Conductor con rostro enrolado: se intentara validacion biometrica." : "Conductor sin rostro enrolado: se intentara detectar rostro.")
     : "Foto obligatoria como evidencia. Biometria no requerida para este cargo.";
@@ -2220,6 +3482,10 @@ async function submitAttendance(event) {
       elements.celularComprobanteInput?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
+  } else {
+    // Red de seguridad: si el numero es nuevo y aun no se pregunto (por ejemplo
+    // porque le dieron Registrar de una), se pregunta aqui antes de guardar la marca.
+    await preguntarGuardarCelular();
   }
 
   if (!state.colaborador) {
@@ -2242,6 +3508,14 @@ async function submitAttendance(event) {
       elements.baseInput.classList.add("invalid");
       elements.baseInput.focus();
       elements.baseInput.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
+    // Si el vehiculo no coincide con el programado se avisa (no bloquea).
+    const seguirConVehiculo = await confirmarVehiculoProgramado();
+    if (!seguirConVehiculo) {
+      elements.vehicleInput.focus();
+      elements.vehicleInput.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
 
@@ -2465,7 +3739,8 @@ async function submitAttendance(event) {
       origen,
       registrado_por: state.user.id,
       observacion: [userObservation, faceObservation, driverObservation, mobileObservation, fotoWarning, bukObservation].filter(Boolean).join(" | ") || null,
-      celular_comprobante: elements.celularComprobanteInput?.value.trim() || null,
+      celular_comprobante: normalizarCelularCo(elements.celularComprobanteInput?.value)
+        || elements.celularComprobanteInput?.value.trim() || null,
       enviado_buk: bukOk,
       buk_status: bukData?.status ?? null,
       buk_respuesta: { obra_id_usado: bukData?.obra_id_usado ?? null, intentos: bukData?.intentos ?? [], error: bukErrorText || null },
@@ -2928,6 +4203,7 @@ function setSentido(sentido) {
   state.nextSentido = sentido;
   renderSentidoSelector();
   renderJornadaHint();
+  renderProgramacionBanner();
 }
 
 function renderJornadaHint() {
@@ -5913,7 +7189,7 @@ elements.registerTabButton.addEventListener("click", () => showTab("register"));
 elements.historyTabButton.addEventListener("click", () => {
   showTab("history");
 });
-elements.databaseTabButton.addEventListener("click", () => showTab("database"));
+elements.base3TabButton?.addEventListener("click", () => showTab("base3"));
 elements.adminTabButton.addEventListener("click", async () => {
   const ok = await requireAdminClave();
   if (ok) showTab("admin");
@@ -5926,6 +7202,32 @@ elements.dniInput.addEventListener("keydown", (event) => {
     event.preventDefault();
     buscarColaborador();
   }
+});
+// Al salir del campo se pregunta sola si se guarda el numero. Si el foco se fue al
+// boton Registrar no se pregunta aqui (el submit ya lo hace) para no comerse el clic.
+elements.celularComprobanteInput?.addEventListener("blur", (event) => {
+  if (event.relatedTarget?.id === "submitButton") return;
+  preguntarGuardarCelular();
+});
+elements.puntualidadBuscarButton?.addEventListener("click", cargarPuntualidad);
+elements.puenteResolverButton?.addEventListener("click", resolverNombresProgramacion);
+elements.jornadasBuscarButton?.addEventListener("click", cargarJornadasAnomalas);
+elements.horarioBuscarButton?.addEventListener("click", cargarHorario);
+elements.horarioExportButton?.addEventListener("click", exportarHorarioCsv);
+elements.base3BuscarButton?.addEventListener("click", cargarBase3);
+elements.base3ExportButton?.addEventListener("click", exportarBase3Csv);
+elements.mapaBuscarButton?.addEventListener("click", cargarMapaMarcas);
+elements.mapaBuscarInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); cargarMapaMarcas(); }
+});
+elements.horarioBuscarInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); cargarHorario(); }
+});
+elements.jornadasFiltros?.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-jornada-filtro]");
+  if (!chip) return;
+  state.jornadasFiltro = chip.dataset.jornadaFiltro || "";
+  renderJornadasAnomalas();
 });
 elements.cameraButton.addEventListener("click", startCamera);
 elements.locationButton.addEventListener("click", captureCurrentLocation);
@@ -6122,6 +7424,16 @@ elements.reloadRechazoButton.addEventListener("click", () => {
 });
 elements.exportRechazoButton.addEventListener("click", exportRechazoToCsv);
 elements.resendAllRechazoButton?.addEventListener("click", reenviarTodasRechazo);
+elements.corregirBuscarButton?.addEventListener("click", buscarCorregir);
+elements.corregirDniInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); buscarCorregir(); }
+});
+elements.corregirResultado?.addEventListener("click", (event) => {
+  const guardar = event.target.closest(".corregir-guardar");
+  if (guardar) { guardarCorreccionMarca(guardar.getAttribute("data-id")); return; }
+  const borrar = event.target.closest(".corregir-borrar");
+  if (borrar) { borrarMarcaCorregir(borrar.getAttribute("data-id")); }
+});
 elements.rechazoBody?.addEventListener("click", (event) => {
   const btn = event.target.closest(".rechazo-resend");
   if (!btn) return;
