@@ -85,6 +85,7 @@ const state = {
   // (p.ej. "estaba en el taller"). Se guarda en la observacion de la marca.
   motivoDesfase: "",
   motivoJornadaExtendida: "",
+  novedadHoy: null,
   horasJornadaExtendida: null,
   // Estado del turno programado que corresponde a este momento (RPC estado_turno_actual).
   // Si viene `completa`, la jornada ya se cumplio y NO se admite otra marca.
@@ -104,6 +105,7 @@ const state = {
   verificadorGestoresData: null,
   verificadorCierresData: null,
   verificadorExcedidasData: null,
+  verificadorNovedadesData: null,
   // Turno anterior sin cerrar que hay que declarar antes de admitir la ENTRADA de hoy.
   cierrePendiente: null,
   horarioLoaded: false,
@@ -298,6 +300,7 @@ const elements = {
   verificadorGestoresButton: $("#verificadorGestoresButton"),
   verificadorCierresButton: $("#verificadorCierresButton"),
   verificadorExcedidasButton: $("#verificadorExcedidasButton"),
+  verificadorNovedadesButton: $("#verificadorNovedadesButton"),
   verificadorExportButton: $("#verificadorExportButton"),
   verificadorStatus: $("#verificadorStatus"),
   verificadorFiltros: $("#verificadorFiltros"),
@@ -2332,6 +2335,141 @@ function renderVerificadorExcedidas() {
   `;
 }
 
+/* --------------------------------------------------------------------------
+   Marcó con novedad: quien registro asistencia teniendo una novedad ese dia.
+   El cruce es por nombre normalizado por tokens, porque `novedades` no tiene
+   cedula y el orden de las palabras no es igual entre las dos fuentes.
+   -------------------------------------------------------------------------- */
+
+async function cargarVerificadorNovedades() {
+  const desde = elements.verificadorDesdeInput?.value;
+  const hasta = elements.verificadorHastaInput?.value;
+  if (!desde || !hasta) {
+    setMessage(elements.verificadorMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.verificadorMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+
+  setBusy(elements.verificadorNovedadesButton, true);
+  setMessage(elements.verificadorMessage, "");
+  elements.verificadorStatus.textContent = "Cruzando marcas con novedades...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("reporte_marcas_con_novedad", {
+      p_desde: desde, p_hasta: hasta
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo generar el reporte.");
+
+    state.verificadorLoaded = true;
+    state.verificadorModo = "novedades";
+    state.verificadorNovedadesData = data;
+    renderVerificadorNovedades();
+  } catch (e) {
+    elements.verificadorStatus.textContent = "No se pudo cruzar marcas con novedades.";
+    setMessage(elements.verificadorMessage, e?.message || "Error consultando el reporte.", "error");
+  } finally {
+    setBusy(elements.verificadorNovedadesButton, false);
+  }
+}
+
+function renderVerificadorNovedades() {
+  const data = state.verificadorNovedadesData;
+  if (!data) return;
+  const t = data.totales || {};
+  let detalle = data.detalle || [];
+
+  elements.verificadorStatus.textContent =
+    `${data.desde} a ${data.hasta} · ${t.dias ?? 0} días con marca y novedad`
+    + ` · solo se verifica desde ${data.corte || state.fechaCorteVerificacion}`;
+  elements.verificadorFiltros.innerHTML = "";
+
+  elements.verificadorTotales.innerHTML = `
+    <div class="punt-card"><span>${t.dias ?? 0}</span><small>días con novedad</small></div>
+    <div class="punt-card"><span>${t.personas ?? 0}</span><small>personas</small></div>
+    <div class="punt-card falta"><span>${t.incompatibles ?? 0}</span><small>no debían estar</small></div>
+    <div class="punt-card"><span>${t.con_programacion ?? 0}</span><small>además tenían turno</small></div>
+  `;
+
+  const q = (elements.verificadorBuscarInput?.value || "").trim().toLowerCase();
+  if (q) {
+    detalle = detalle.filter((x) =>
+      `${x.nombre || ""} ${x.dni || ""} ${x.estado || ""} ${x.cargo || ""}`
+        .toLowerCase().includes(q));
+  }
+
+  if (!detalle.length) {
+    elements.verificadorDetalle.innerHTML = "";
+    setMessage(elements.verificadorMessage,
+      (data.detalle || []).length
+        ? "Sin resultados con ese filtro."
+        : "Nadie marcó teniendo una novedad en ese rango. 👌", "success");
+    return;
+  }
+  setMessage(elements.verificadorMessage, "");
+
+  const esc = (v) => escapeHtml(String(v ?? ""));
+  const estados = data.estados || [];
+
+  elements.verificadorDetalle.innerHTML = `
+    <p class="field-hint">Estas personas <strong>registraron asistencia</strong> el mismo día en
+    que la programación las reportaba con una novedad. Marcar en <strong>DESCANSO</strong> puede
+    ser legítimo —le pidieron cubrir un turno—, pero tiene que quedar visible. Marcar en
+    <strong>INCAPACITADO, VACACIONES o RENUNCIA</strong> no lo es: esas van en rojo.
+    <br>El cruce es <strong>por nombre</strong>, porque la tabla de novedades no guarda cédula.</p>
+
+    <div class="tabla-scroll">
+    <table class="punt-tabla verif-tabla">
+      <thead><tr>
+        <th>Fecha</th><th>Persona</th><th>Cédula</th><th>Cargo</th>
+        <th>Novedad</th><th>Base</th><th>Entrada</th><th>Salida</th>
+        <th>Marcas</th><th>¿Tenía turno?</th>
+      </tr></thead>
+      <tbody>
+        ${detalle.map((d) => `
+          <tr class="${d.incompatible ? "je-sinexplicar" : ""}">
+            <td>${esc(d.fecha)}</td>
+            <td>${esc(d.nombre)}</td>
+            <td>${esc(d.dni)}</td>
+            <td>${esc(d.cargo || "—")}</td>
+            <td><span class="jornada-pill ${d.incompatible ? "jt-larga" : "jt-sincerrar"}">${esc(d.estado)}</span></td>
+            <td>${esc(d.base_novedad || "—")}</td>
+            <td>${esc(d.entrada || "—")}</td>
+            <td>${esc(d.salida || "—")}</td>
+            <td>${d.marcas ?? 0}</td>
+            <td>${d.tenia_programacion
+                  ? `<span class="jornada-pill jt-ok">Sí</span>`
+                  : "<em>no</em>"}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+    </div>
+
+    ${estados.length ? `
+    <details class="puntualidad-detalle" open>
+      <summary>Resumen por estado (${estados.length})</summary>
+      <div class="tabla-scroll">
+      <table class="punt-tabla">
+        <thead><tr><th>Estado</th><th>Días</th><th>Personas</th><th>¿Compatible con laborar?</th></tr></thead>
+        <tbody>
+          ${estados.map((e) => `
+            <tr>
+              <td>${esc(e.estado)}</td>
+              <td><strong>${e.veces}</strong></td>
+              <td>${e.personas}</td>
+              <td>${e.incompatible
+                    ? `<strong class="punt-warn">No</strong>` : "Sí"}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+      </div>
+    </details>` : ""}
+  `;
+}
+
 // Re-render según el modo activo (lo usa el filtro de texto).
 function rerenderVerificador() {
   if (state.verificadorModo === "dia") renderVerificadorDia();
@@ -2339,6 +2477,7 @@ function rerenderVerificador() {
   else if (state.verificadorModo === "gestores") renderVerificadorGestores();
   else if (state.verificadorModo === "cierres") renderVerificadorCierres();
   else if (state.verificadorModo === "excedidas") renderVerificadorExcedidas();
+  else if (state.verificadorModo === "novedades") renderVerificadorNovedades();
   else renderVerificador();
 }
 
@@ -2571,6 +2710,7 @@ async function borrarMarcaVerificador(rowEl, sentido) {
     else if (state.verificadorModo === "gestores") await cargarVerificadorGestores();
     else if (state.verificadorModo === "cierres") await cargarVerificadorCierres();
     else if (state.verificadorModo === "excedidas") await cargarVerificadorExcedidas();
+    else if (state.verificadorModo === "novedades") await cargarVerificadorNovedades();
     else await cargarVerificador();
   } catch (e) {
     setMessage(elements.verificadorMessage, `No se pudo eliminar: ${e.message || e}`, "error");
@@ -2584,7 +2724,23 @@ function exportarVerificadorCsv() {
   };
   let header, lineas, nombreArchivo;
 
-  if (state.verificadorModo === "excedidas") {
+  if (state.verificadorModo === "novedades") {
+    const data = state.verificadorNovedadesData;
+    const filas = data?.detalle || [];
+    if (!filas.length) {
+      setMessage(elements.verificadorMessage, "Primero consulta un rango con novedades.", "error");
+      return;
+    }
+    header = ["Fecha", "Cedula", "Persona", "Cargo", "Novedad", "Base novedad",
+      "Incompatible con laborar", "Entrada", "Salida", "Marcas", "Tenia turno programado"];
+    lineas = [header.join(";")];
+    filas.forEach((d) => {
+      lineas.push([d.fecha, d.dni, d.nombre, d.cargo || "", d.estado, d.base_novedad || "",
+        d.incompatible ? "SI" : "NO", d.entrada || "", d.salida || "", d.marcas ?? 0,
+        d.tenia_programacion ? "SI" : "NO"].map(esc).join(";"));
+    });
+    nombreArchivo = `marcas_con_novedad_${data.desde}_${data.hasta}.csv`;
+  } else if (state.verificadorModo === "excedidas") {
     const data = state.verificadorExcedidasData;
     const filas = data?.detalle || [];
     if (!filas.length) {
@@ -3541,6 +3697,7 @@ function limpiarProgramacion() {
   state.programacionAvisoHorario = "";
   state.motivoDesfase = "";
   state.motivoJornadaExtendida = "";
+  state.novedadHoy = null;
   state.turnoEstado = null;
   elements.programacionBanner?.classList.add("hidden");
 }
@@ -3773,6 +3930,38 @@ function renderProgramacionBanner() {
 
     const anuncio = anuncioSentidoHtml(state.nextSentido || "entrada", null);
 
+    // La tabla `novedades` es la otra cara de la programacion: si no hay turno,
+    // muchas veces si hay una razon escrita (DESCANSO, VACACIONES, INCAPACITADO...).
+    // Decirla es mejor que un "sin programacion" que no explica nada.
+    const nov = state.programacionHoy?.novedad || state.novedadHoy;
+    if (nov?.existe) {
+      const bloquea = !!nov.bloquea;
+      banner.className = `programacion-banner ${bloquea ? "tarde" : "info"}`;
+      banner.innerHTML = `
+        ${anuncio}
+        <div class="programacion-titulo">
+          <i data-lucide="${bloquea ? "alert-octagon" : "calendar-off"}"></i>
+          Hoy figura en <strong>${escapeHtml(nov.estado)}</strong>
+          <span class="prog-chip ${bloquea ? "tarde" : "neutro"}">${bloquea ? "No debería marcar" : "Sin turno"}</span>
+        </div>
+        <div class="programacion-estado">
+          ${bloquea
+            ? `La programación lo tiene en <strong>${escapeHtml(nov.estado)}</strong>
+               (${escapeHtml(nov.base || "sin base")}), que <strong>no es compatible con estar
+               laborando</strong>. Confirma con administración antes de registrar: si la marca
+               igual va, quedará señalada.`
+            : `Por eso no tiene turno asignado hoy: la programación lo reporta en
+               <strong>${escapeHtml(nov.estado)}</strong> (${escapeHtml(nov.base || "sin base")}).
+               Si vino a cubrir un turno, puedes registrar la marca; queda visible en
+               Administración.`}
+          <br>El tipo de marca se define por la última registrada:
+          <strong>revísalo abajo</strong> antes de guardar.
+        </div>`;
+      banner.classList.remove("hidden");
+      if (window.lucide?.createIcons) window.lucide.createIcons();
+      return;
+    }
+
     if (esConductor) {
       // Un conductor SIEMPRE deberia tener turno: esto es una alerta real.
       banner.className = "programacion-banner tarde";
@@ -3888,6 +4077,9 @@ async function cargarProgramacionDia(dni) {
       state.programacionHoy = data;
       autocompletarDesdeProgramacion();
     }
+    // Sin turno, la razon suele estar en `novedades` (DESCANSO, VACACIONES...).
+    // Se guarda aparte porque programacionHoy solo se llena cuando SI hay turno.
+    state.novedadHoy = (data?.ok && data.novedad?.existe) ? data.novedad : null;
     // Se pinta siempre: sin programacion el aviso explica POR QUE no la hay
     // (gestores, auxiliares...) o alerta si es un conductor, que si deberia tenerla.
     renderProgramacionBanner();
@@ -9465,6 +9657,7 @@ elements.programacionBanner?.addEventListener("click", async (event) => {
 elements.verificadorGestoresButton?.addEventListener("click", cargarVerificadorGestores);
 elements.verificadorCierresButton?.addEventListener("click", cargarVerificadorCierres);
 elements.verificadorExcedidasButton?.addEventListener("click", cargarVerificadorExcedidas);
+elements.verificadorNovedadesButton?.addEventListener("click", cargarVerificadorNovedades);
 elements.verificadorExportButton?.addEventListener("click", exportarVerificadorCsv);
 elements.verificadorFiltrarButton?.addEventListener("click", () => rerenderVerificador());
 // Al cambiar una fecha se vuelve a consultar sola, respetando el modo activo, para
@@ -9478,6 +9671,7 @@ elements.verificadorFiltrarButton?.addEventListener("click", () => rerenderVerif
     else if (state.verificadorModo === "gestores") cargarVerificadorGestores();
     else if (state.verificadorModo === "cierres") cargarVerificadorCierres();
     else if (state.verificadorModo === "excedidas") cargarVerificadorExcedidas();
+    else if (state.verificadorModo === "novedades") cargarVerificadorNovedades();
     else cargarVerificador();
   });
 });
