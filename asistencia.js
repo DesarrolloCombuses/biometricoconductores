@@ -1555,17 +1555,33 @@ function describirJornada(d) {
    ========================================================================== */
 
 function setupVerificadorDefaults() {
-  if (!elements.verificadorDesdeInput || elements.verificadorDesdeInput.value) return;
-  const hoy = getTodayParts().date;
+  if (!elements.verificadorDesdeInput) return;
   const corte = state.fechaCorteVerificacion;
+
+  // El tope se pone SIEMPRE, aunque las fechas ya esten puestas: no se verifica
+  // nada anterior al corte y el calendario no debe ofrecerlo siquiera.
+  elements.verificadorDesdeInput.min = corte;
+  elements.verificadorHastaInput.min = corte;
+
+  if (elements.verificadorDesdeInput.value) return;
+  const hoy = getTodayParts().date;
   const desde = new Date(`${hoy}T00:00:00`);
   desde.setDate(desde.getDate() - 6); // por defecto, la última semana
   let desdeStr = desde.toISOString().slice(0, 10);
   if (desdeStr < corte) desdeStr = corte;
   elements.verificadorDesdeInput.value = desdeStr;
   elements.verificadorHastaInput.value = hoy;
-  elements.verificadorDesdeInput.min = corte;
-  elements.verificadorHastaInput.min = corte;
+}
+
+// El `min` del input lo respeta el calendario, pero no siempre lo que se escribe a
+// mano. Esto corrige la fecha en el acto para que nunca se consulte antes del corte.
+function clampFechaVerificador(input) {
+  const corte = state.fechaCorteVerificacion;
+  if (!input?.value || input.value >= corte) return false;
+  input.value = corte;
+  setMessage(elements.verificadorMessage,
+    `Solo se verifica desde el ${corte}: la fecha se ajustó a esa.`, "");
+  return true;
 }
 
 async function cargarVerificador() {
@@ -2089,7 +2105,8 @@ function renderVerificadorCierres() {
   let detalle = data.detalle || [];
 
   elements.verificadorStatus.textContent =
-    `${data.desde} a ${data.hasta} · ${t.cierres ?? 0} turnos cerrados a mano`;
+    `${data.desde} a ${data.hasta} · ${t.cierres ?? 0} turnos cerrados a mano`
+    + ` · solo se verifica desde ${data.corte || state.fechaCorteVerificacion}`;
   elements.verificadorFiltros.innerHTML = "";
 
   const retraso = t.retraso_mediano;
@@ -2228,7 +2245,8 @@ function renderVerificadorExcedidas() {
   let detalle = data.detalle || [];
 
   elements.verificadorStatus.textContent =
-    `${data.desde} a ${data.hasta} · ${t.jornadas ?? 0} jornadas de más de ${limite} h`;
+    `${data.desde} a ${data.hasta} · ${t.jornadas ?? 0} jornadas de más de ${limite} h`
+    + ` · solo se verifica desde ${data.corte || state.fechaCorteVerificacion}`;
   elements.verificadorFiltros.innerHTML = "";
 
   elements.verificadorTotales.innerHTML = `
@@ -2263,7 +2281,10 @@ function renderVerificadorExcedidas() {
     ("las marcas excedieron el máximo de horas permitidas"), así que estas marcas están en
     nuestra base pero <strong>no entraron a nómina</strong>. El límite no es arbitrario:
     sobre 9.603 jornadas, por debajo de 16 h el rechazo es del 0,1&nbsp;%, y entre 16 y 17 h
-    fueron 26 de 26. Las filas en rojo son las que <strong>nadie ha explicado todavía</strong>.</p>
+    fueron 26 de 26. Las filas en rojo son las que <strong>nadie ha explicado todavía</strong>.
+    <br>Se verifica <strong>estrictamente desde el ${esc(data.corte || state.fechaCorteVerificacion)}</strong>:
+    una jornada solo cuenta si la entrada <em>y</em> la salida caen de esa fecha en adelante.
+    ${data.recortado ? `<strong class="punt-warn">El rango pedido se recortó al corte.</strong>` : ""}</p>
 
     <div class="tabla-scroll">
     <table class="punt-tabla verif-tabla">
@@ -9450,6 +9471,7 @@ elements.verificadorFiltrarButton?.addEventListener("click", () => rerenderVerif
 // que la tabla no quede con el rango anterior.
 [elements.verificadorDesdeInput, elements.verificadorHastaInput].forEach((inp) => {
   inp?.addEventListener("change", () => {
+    clampFechaVerificador(inp);
     if (!state.verificadorLoaded) return;
     if (state.verificadorModo === "dia") cargarVerificadorDia();
     else if (state.verificadorModo === "desfases") cargarVerificadorDesfases();
