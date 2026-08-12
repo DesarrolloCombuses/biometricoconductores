@@ -3196,6 +3196,16 @@ function jornadaYaCumplida() {
   return !!(state.turnoEstado?.existe && state.turnoEstado?.completa);
 }
 
+// Momento del reporte como timestamp ("YYYY-MM-DDTHH:MM:SS"). En produccion es la
+// hora del servidor; en local puede estar editada para pruebas, y todo lo que se
+// evalua (programacion, turno cumplido) debe seguir ESA fecha, no la de hoy.
+function momentoReporte() {
+  const p = getReportParts();
+  if (!p?.date || !p?.time) return null;
+  const t = p.time.length === 5 ? `${p.time}:00` : p.time;
+  return `${p.date}T${t}`;
+}
+
 // Consulta si el turno de este momento ya esta cumplido. Se llama despues de
 // cargar la programacion, porque de ahi sale el aviso y el bloqueo.
 async function cargarEstadoTurno(dni) {
@@ -3203,7 +3213,7 @@ async function cargarEstadoTurno(dni) {
   if (!dni) return;
   try {
     const { data, error } = await supabaseClient.rpc("estado_turno_actual", {
-      p_dni: dni, p_momento: null
+      p_dni: dni, p_momento: momentoReporte()
     });
     if (error) throw error;
     if (data?.ok) state.turnoEstado = data;
@@ -3674,6 +3684,28 @@ async function ofrecerCierreTurnoAnterior(sug) {
     showAlertModal("No se pudo cerrar el turno anterior", e.message || String(e));
     return false;
   }
+}
+
+// Si se cambia la fecha/hora del reporte (modo local, para pruebas) hay que volver a
+// consultar la programacion de ESE dia: si no, se sigue viendo el turno del dia en
+// que se valido la cedula. No se vuelve a lanzar el cierre automatico del turno
+// anterior: eso solo debe ocurrir al validar, no cada vez que se toca la fecha.
+let refrescoFechaTimer = null;
+function refrescarPorFechaReporte() {
+  const dni = normalizeDni(elements.dniInput?.value);
+  if (!dni || (!state.csvCandidate && !state.colaborador)) return;
+
+  clearTimeout(refrescoFechaTimer);
+  refrescoFechaTimer = setTimeout(async () => {
+    await cargarProgramacionDia(dni);
+    await cargarEstadoTurno(dni);
+    // Se recalcula la sugerencia del horario, pero sin tocar el sentido ya elegido
+    // ni disparar dialogos: quien registra decide con el aviso a la vista.
+    state.sentidoSegunProgramacion = sentidoSugeridoPorProgramacion();
+    renderProgramacionBanner();
+    renderSentidoSelector();
+    updateVehicleHint();
+  }, 350);
 }
 
 // Decide el sentido inicial dando prioridad a la programacion sobre la ultima marca.
@@ -8825,8 +8857,14 @@ elements.adminSubtabs?.addEventListener("click", (event) => {
   showAdminSubtab(btn.dataset.adminTab);
 });
 elements.attendanceForm.addEventListener("submit", submitAttendance);
-elements.reportDateInput.addEventListener("input", () => { state.reportDateTouched = true; });
-elements.reportTimeInput.addEventListener("input", () => { state.reportTimeTouched = true; });
+elements.reportDateInput.addEventListener("input", () => {
+  state.reportDateTouched = true;
+  refrescarPorFechaReporte();
+});
+elements.reportTimeInput.addEventListener("input", () => {
+  state.reportTimeTouched = true;
+  refrescarPorFechaReporte();
+});
 elements.sentidoEntradaButton.addEventListener("click", () => cambiarSentidoManual("entrada"));
 elements.sentidoSalidaButton.addEventListener("click", () => cambiarSentidoManual("salida"));
 elements.refreshButton.addEventListener("click", refreshCurrentHistory);
