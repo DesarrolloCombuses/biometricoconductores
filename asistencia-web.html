@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20260812d-programacion-por-fecha">
+  <link rel="stylesheet" href="./asistencia.css?v=20260812e-cierre-declarado">
 </head>
 <body>
   <main class="shell">
@@ -1186,6 +1186,10 @@
                 <i data-lucide="user-check"></i>
                 Gestores y auxiliares
               </button>
+              <button id="verificadorCierresButton" class="primary" type="button">
+                <i data-lucide="file-clock"></i>
+                Cierres declarados
+              </button>
               <button id="verificadorExportButton" class="secondary" type="button">
                 <i data-lucide="download"></i>
                 Exportar Excel
@@ -1570,13 +1574,54 @@
       </div>
     </section>
 
+    <!-- Cierre de un turno que quedo sin salida. El operario DECLARA la hora real y el
+         motivo; ambos quedan en la bitacora `cierres_turno` con su nombre y la fecha en
+         que lo declaro. Antes la app cerraba sola en la hora programada, sin explicacion. -->
+    <section id="cierreOverlay" class="process-overlay hidden" aria-modal="true" role="dialog">
+      <div class="process-modal alert-modal cierre-modal">
+        <strong id="cierreTitle">Turno sin cerrar</strong>
+        <p id="cierreText"></p>
+
+        <div class="cierre-paso">
+          <span class="cierre-num">1</span>
+          <div class="cierre-cuerpo">
+            <label class="cierre-campo">
+              ¿A qué hora terminó realmente ese turno?
+              <input id="cierreHoraInput" type="time" step="60" autocomplete="off">
+            </label>
+            <p id="cierreHoraHint" class="field-hint"></p>
+          </div>
+        </div>
+
+        <div class="cierre-paso">
+          <span class="cierre-num">2</span>
+          <div class="cierre-cuerpo">
+            <span class="cierre-label">¿Por qué no quedó registrada la salida ese día?</span>
+            <div class="motivo-opciones" id="cierreOpciones"></div>
+            <label class="motivo-campo">
+              Detalle
+              <input id="cierreMotivoInput" type="text" maxlength="140" autocomplete="off"
+                     placeholder="Ej: entregó el vehículo en el taller y no pasó por la base">
+            </label>
+          </div>
+        </div>
+
+        <div class="cierre-resumen" id="cierreResumen"></div>
+        <p id="cierreError" class="message" role="status"></p>
+        <div class="confirm-actions">
+          <button id="cierreCancel" class="secondary" type="button">Registrar SALIDA aquí</button>
+          <button id="cierreAccept" class="primary" type="button">Cerrar turno y registrar ENTRADA</button>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20260812d-programacion-por-fecha"></script>
+  <script src="./asistencia.js?v=20260812e-cierre-declarado"></script>
 </body>
 </html>
 

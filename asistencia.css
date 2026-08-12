@@ -1188,6 +1188,92 @@ svg {
   font-size: 0.92rem;
 }
 
+/* Cierre declarado de un turno sin salida: dos pasos numerados y un resumen final
+   que dice, en texto, exactamente lo que se va a guardar y a nombre de quien. */
+.cierre-modal {
+  text-align: left;
+  max-width: 480px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.cierre-paso {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 14px 0;
+}
+
+.cierre-num {
+  flex: 0 0 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--primary, #0a6b3b);
+  color: #fff;
+  font-size: 0.76rem;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  margin-top: 2px;
+}
+
+.cierre-cuerpo {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.cierre-label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted, #5b6472);
+}
+
+.cierre-campo {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted, #5b6472);
+}
+.cierre-campo input {
+  display: block;
+  margin-top: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--border, #cfd4dc);
+  border-radius: 8px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #1f2937;
+}
+
+.cierre-resumen {
+  background: #f2f7f4;
+  border: 1px solid #cfe3d7;
+  border-left: 3px solid var(--primary, #0a6b3b);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.82rem;
+  color: #2b3a46;
+  margin-top: 6px;
+}
+.cierre-resumen ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.cierre-resumen li {
+  margin-bottom: 3px;
+}
+
+/* Bitacora de cierres: resalta lo que administracion ya corrigio a mano. */
+.ct-corregida {
+  background: #fff7e6;
+}
+.ct-motivo {
+  max-width: 260px;
+  white-space: normal;
+}
+
 /* Tablas anchas (anticipos y excesos): que desplacen solas, sin estirar la pagina. */
 .tabla-scroll {
   overflow-x: auto;

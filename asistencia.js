@@ -95,10 +95,12 @@ const state = {
   verificadorData: null,
   verificadorFiltro: "",
   // "errores" (rango) | "dia" (consolidado del día) | "desfases" (anticipos/excesos)
+  // | "gestores" (personal sin programación) | "cierres" (bitácora de cierres declarados)
   verificadorModo: "errores",
   verificadorDiaData: null,
   verificadorDesfasesData: null,
   verificadorGestoresData: null,
+  verificadorCierresData: null,
   horarioLoaded: false,
   horarioFilas: [],
   base3Loaded: false,
@@ -242,6 +244,17 @@ const elements = {
   motivoError: $("#motivoError"),
   motivoAccept: $("#motivoAccept"),
   motivoCancel: $("#motivoCancel"),
+  cierreOverlay: $("#cierreOverlay"),
+  cierreTitle: $("#cierreTitle"),
+  cierreText: $("#cierreText"),
+  cierreHoraInput: $("#cierreHoraInput"),
+  cierreHoraHint: $("#cierreHoraHint"),
+  cierreOpciones: $("#cierreOpciones"),
+  cierreMotivoInput: $("#cierreMotivoInput"),
+  cierreResumen: $("#cierreResumen"),
+  cierreError: $("#cierreError"),
+  cierreAccept: $("#cierreAccept"),
+  cierreCancel: $("#cierreCancel"),
   celularComprobanteInput: $("#celularComprobanteInput"),
   celularAgendaHint: $("#celularAgendaHint"),
   programacionBanner: $("#programacionBanner"),
@@ -278,6 +291,7 @@ const elements = {
   verificadorDiaButton: $("#verificadorDiaButton"),
   verificadorDesfasesButton: $("#verificadorDesfasesButton"),
   verificadorGestoresButton: $("#verificadorGestoresButton"),
+  verificadorCierresButton: $("#verificadorCierresButton"),
   verificadorExportButton: $("#verificadorExportButton"),
   verificadorStatus: $("#verificadorStatus"),
   verificadorFiltros: $("#verificadorFiltros"),
@@ -2021,11 +2035,149 @@ function renderVerificadorGestores() {
   `;
 }
 
+/* --------------------------------------------------------------------------
+   Cierres declarados: la bitacora de los turnos que se cerraron a mano.
+   Responde tres preguntas que antes no tenian respuesta: a que hora dijo el
+   operario que termino, por que no quedo la marca, y quien lo declaro y cuando.
+   -------------------------------------------------------------------------- */
+
+async function cargarVerificadorCierres() {
+  const desde = elements.verificadorDesdeInput?.value;
+  const hasta = elements.verificadorHastaInput?.value;
+  if (!desde || !hasta) {
+    setMessage(elements.verificadorMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.verificadorMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+
+  setBusy(elements.verificadorCierresButton, true);
+  setMessage(elements.verificadorMessage, "");
+  elements.verificadorStatus.textContent = "Consultando cierres declarados...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("reporte_cierres_turno", {
+      p_desde: desde, p_hasta: hasta
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo generar la bitácora.");
+
+    state.verificadorLoaded = true;
+    state.verificadorModo = "cierres";
+    state.verificadorCierresData = data;
+    renderVerificadorCierres();
+  } catch (e) {
+    elements.verificadorStatus.textContent = "No se pudo consultar la bitácora de cierres.";
+    setMessage(elements.verificadorMessage, e?.message || "Error consultando la bitácora.", "error");
+  } finally {
+    setBusy(elements.verificadorCierresButton, false);
+  }
+}
+
+function renderVerificadorCierres() {
+  const data = state.verificadorCierresData;
+  if (!data) return;
+  const t = data.totales || {};
+  let detalle = data.detalle || [];
+
+  elements.verificadorStatus.textContent =
+    `${data.desde} a ${data.hasta} · ${t.cierres ?? 0} turnos cerrados a mano`;
+  elements.verificadorFiltros.innerHTML = "";
+
+  const retraso = t.retraso_mediano;
+  elements.verificadorTotales.innerHTML = `
+    <div class="punt-card"><span>${t.cierres ?? 0}</span><small>cierres declarados</small></div>
+    <div class="punt-card"><span>${t.personas ?? 0}</span><small>personas</small></div>
+    <div class="punt-card falta"><span>${t.corregidos ?? 0}</span><small>corregidos después</small></div>
+    <div class="punt-card"><span>${retraso != null ? retraso + " h" : "—"}</span><small>retraso mediano</small></div>
+  `;
+
+  const q = (elements.verificadorBuscarInput?.value || "").trim().toLowerCase();
+  if (q) {
+    detalle = detalle.filter((x) =>
+      `${x.nombre || ""} ${x.dni || ""} ${x.motivo || ""} ${x.declarado_nombre || ""}`
+        .toLowerCase().includes(q));
+  }
+
+  if (!detalle.length) {
+    elements.verificadorDetalle.innerHTML = "";
+    setMessage(elements.verificadorMessage,
+      (data.detalle || []).length
+        ? "Sin resultados con ese filtro."
+        : "No se cerró ningún turno a mano en ese rango. 👌", "success");
+    return;
+  }
+  setMessage(elements.verificadorMessage, "");
+
+  const esc = (v) => escapeHtml(String(v ?? ""));
+  const motivos = data.motivos || [];
+
+  elements.verificadorDetalle.innerHTML = `
+    <p class="field-hint">Cada fila es un turno que quedó <strong>sin marca de salida</strong> y que
+    alguien cerró declarando la hora. La marca creada no es biométrica y no se envía a Buk: queda
+    aquí para que se revise. El <strong>retraso</strong> es cuánto tiempo después del hecho se
+    declaró; mientras más alto, más tarde se detectó la brecha.</p>
+
+    <div class="tabla-scroll">
+    <table class="punt-tabla verif-tabla">
+      <thead><tr>
+        <th>Entrada</th><th>Persona</th><th>Cédula</th><th>Cargo</th>
+        <th>Salida declarada</th><th>Programada</th><th>Ajuste</th>
+        <th>Jornada</th><th>Motivo</th><th>Declaró</th><th>Cuándo</th><th>Retraso</th>
+      </tr></thead>
+      <tbody>
+        ${detalle.map((d) => {
+          const aj = d.minutos_ajuste;
+          const ajTxt = aj == null ? "—"
+            : aj === 0 ? "en punto"
+            : `${Math.abs(aj)} min ${aj > 0 ? "después" : "antes"}`;
+          const horaMostrada = d.hora_actual || d.hora_declarada;
+          return `
+          <tr class="${d.corregida ? "ct-corregida" : ""}">
+            <td>${esc(d.entrada_fecha)}<br><small>${esc(d.entrada_hora)}</small></td>
+            <td>${esc(d.nombre)}</td>
+            <td>${esc(d.dni)}</td>
+            <td>${esc(d.cargo || "—")}</td>
+            <td><strong>${esc(horaMostrada)}</strong>${d.corregida
+                ? `<br><small class="punt-warn">declaró ${esc(d.hora_declarada)}, corregida</small>` : ""}</td>
+            <td>${esc(d.hora_programada || "—")}</td>
+            <td class="${aj ? "punt-warn" : ""}">${esc(ajTxt)}</td>
+            <td>${d.horas_jornada != null ? `<strong>${d.horas_jornada} h</strong>` : "—"}</td>
+            <td class="ct-motivo">${esc(d.motivo)}</td>
+            <td>${esc(d.declarado_nombre || "—")}</td>
+            <td><small>${esc(d.declarado_at)}</small></td>
+            <td class="${d.horas_retraso > 24 ? "punt-warn" : ""}">${
+              d.horas_retraso != null ? d.horas_retraso + " h" : "—"}</td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+    </div>
+
+    ${motivos.length ? `
+    <details class="puntualidad-detalle" open>
+      <summary>Por qué no se cerraron (${motivos.length} motivos distintos)</summary>
+      <div class="tabla-scroll">
+      <table class="punt-tabla">
+        <thead><tr><th>Motivo</th><th>Veces</th></tr></thead>
+        <tbody>
+          ${motivos.map((m) => `
+            <tr><td>${esc(m.motivo)}</td><td><strong>${m.veces}</strong></td></tr>`).join("")}
+        </tbody>
+      </table>
+      </div>
+    </details>` : ""}
+  `;
+}
+
 // Re-render según el modo activo (lo usa el filtro de texto).
 function rerenderVerificador() {
   if (state.verificadorModo === "dia") renderVerificadorDia();
   else if (state.verificadorModo === "desfases") renderVerificadorDesfases();
   else if (state.verificadorModo === "gestores") renderVerificadorGestores();
+  else if (state.verificadorModo === "cierres") renderVerificadorCierres();
   else renderVerificador();
 }
 
@@ -2256,6 +2408,7 @@ async function borrarMarcaVerificador(rowEl, sentido) {
     if (state.verificadorModo === "dia") await cargarVerificadorDia();
     else if (state.verificadorModo === "desfases") await cargarVerificadorDesfases();
     else if (state.verificadorModo === "gestores") await cargarVerificadorGestores();
+    else if (state.verificadorModo === "cierres") await cargarVerificadorCierres();
     else await cargarVerificador();
   } catch (e) {
     setMessage(elements.verificadorMessage, `No se pudo eliminar: ${e.message || e}`, "error");
@@ -2269,7 +2422,26 @@ function exportarVerificadorCsv() {
   };
   let header, lineas, nombreArchivo;
 
-  if (state.verificadorModo === "gestores") {
+  if (state.verificadorModo === "cierres") {
+    const data = state.verificadorCierresData;
+    const filas = data?.detalle || [];
+    if (!filas.length) {
+      setMessage(elements.verificadorMessage, "Primero consulta un rango con cierres para exportar.", "error");
+      return;
+    }
+    header = ["Fecha entrada", "Hora entrada", "Cedula", "Persona", "Cargo",
+      "Fecha salida", "Hora declarada", "Hora actual", "Corregida", "Hora programada",
+      "Ajuste (min)", "Jornada (h)", "Motivo", "Declarado por", "Declarado el", "Retraso (h)"];
+    lineas = [header.join(";")];
+    filas.forEach((d) => {
+      lineas.push([d.entrada_fecha, d.entrada_hora, d.dni, d.nombre, d.cargo || "",
+        d.salida_fecha, d.hora_declarada, d.hora_actual || "", d.corregida ? "SI" : "NO",
+        d.hora_programada || "", d.minutos_ajuste ?? "", d.horas_jornada ?? "",
+        d.motivo, d.declarado_nombre || "", d.declarado_at || "", d.horas_retraso ?? ""]
+        .map(esc).join(";"));
+    });
+    nombreArchivo = `cierres_declarados_${data.desde}_${data.hasta}.csv`;
+  } else if (state.verificadorModo === "gestores") {
     const data = state.verificadorGestoresData;
     const filas = data?.detalle || [];
     if (!filas.length) {
@@ -3641,28 +3813,196 @@ function sentidoSugeridoPorProgramacion() {
   return mejor;
 }
 
-// Cierra el turno anterior en su hora PROGRAMADA de salida y deja la marca de hoy
+// Motivos frecuentes por los que una salida no quedo registrada el dia que era.
+// Son otros que los de MOTIVOS_DESFASE: alli la marca existe pero a destiempo; aqui
+// la marca nunca se hizo, que es la brecha que hay que cerrar.
+const MOTIVOS_SIN_CIERRE = [
+  "Se le olvidó marcar la salida",
+  "Terminó fuera de la base",
+  "Entregó el vehículo en el taller",
+  "No había quien le registrara",
+  "Falla de la aplicación o del equipo",
+  "Terminó después del cierre del punto"
+];
+
+// Hora de salida PROGRAMADA del turno al que pertenece una entrada abierta. Es la
+// propuesta que se le muestra al operario (editable) y la referencia contra la que
+// despues se mide cuanto se aparto lo que declaro.
+async function salidaProgramadaDeEntrada(dni, open) {
+  if (!dni || !open?.fecha) return null;
+  try {
+    const { data, error } = await supabaseClient.rpc("obtener_programacion_dia", {
+      p_dni: dni, p_fecha: open.fecha
+    });
+    if (error || !data?.ok || !data.existe) return null;
+
+    const horaEnt = String(open.hora || "").slice(0, 5);
+    const minEnt = horaAMinutos(horaEnt);
+    let mejor = null;
+    for (const t of (data.turnos || [])) {
+      if (!t.hora_salida || !t.hora_entrada) continue;
+      const d = minEnt === null ? 0 : Math.abs(horaAMinutos(t.hora_entrada) - minEnt);
+      if (!mejor || d < mejor.d) mejor = { d, turno: t };
+    }
+    return mejor?.turno || null;
+  } catch {
+    return null;
+  }
+}
+
+function horaAMinutos(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || ""));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+// Suma dias a una fecha 'YYYY-MM-DD' sin pasar por la zona horaria del equipo.
+function sumarDiasIso(iso, dias) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+  if (!m) return iso;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  d.setUTCDate(d.getUTCDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
+// Duracion del turno si se declara `hora` como salida, contando que puede cruzar la
+// medianoche (igual que lo resuelve cerrar_turno_automatico en la base).
+function horasDeJornada(horaEntrada, horaSalida) {
+  const a = horaAMinutos(horaEntrada);
+  const b = horaAMinutos(horaSalida);
+  if (a === null || b === null) return null;
+  const diff = b <= a ? b + 1440 - a : b - a;
+  return Math.round((diff / 60) * 10) / 10;
+}
+
+// Pide al operario que DECLARE la hora real de salida y el motivo por el que no quedo
+// registrada. Devuelve {hora, motivo} o null si prefiere registrar la salida ahora.
+function pedirCierreTurno({ open, horaAbierta, turnoProg, horaTurnoHoy, nombre }) {
+  return new Promise((resolve) => {
+    const ov = elements.cierreOverlay;
+    if (!ov) { resolve(null); return; }
+
+    const horaProg = String(turnoProg?.hora_salida || "").slice(0, 5);
+    elements.cierreTitle.textContent = "Falta cerrar un turno";
+    elements.cierreText.textContent =
+      `${nombre || "Esta persona"} marcó ENTRADA el ${open.fecha} a las ${horaAbierta} `
+      + "y nunca registró la salida. "
+      + (horaTurnoHoy
+          ? `Según la programación, ahora está llegando a su turno de las ${horaTurnoHoy}. `
+          : "")
+      + "Antes de registrar esta entrada hay que cerrar el turno pendiente.";
+
+    elements.cierreHoraInput.value = horaProg || "";
+    elements.cierreHoraHint.textContent = horaProg
+      ? `Se propone la hora programada de salida (${horaProg}). Corrígela si terminó a otra hora.`
+      : "Ese turno no tiene hora programada de salida: escribe la hora real a la que terminó.";
+    elements.cierreMotivoInput.value = "";
+    setMessage(elements.cierreError, "");
+    elements.cierreOpciones.innerHTML = MOTIVOS_SIN_CIERRE.map((m) =>
+      `<button type="button" class="motivo-chip">${escapeHtml(m)}</button>`).join("");
+
+    // El resumen es la parte explicativa: antes de confirmar se ve, en texto plano,
+    // exactamente lo que va a quedar guardado y a nombre de quien.
+    const pintarResumen = () => {
+      const hora = elements.cierreHoraInput.value;
+      const motivo = elements.cierreMotivoInput.value.trim();
+      const horas = horasDeJornada(horaAbierta, hora);
+      const ajuste = (horaProg && hora)
+        ? horaAMinutos(hora) - horaAMinutos(horaProg) : null;
+      const ajusteTxt = ajuste === null ? ""
+        : ajuste === 0 ? " (igual a la programada)"
+        : ` (${Math.abs(ajuste)} min ${ajuste > 0 ? "después" : "antes"} de la programada)`;
+
+      // Si la hora declarada es anterior o igual a la de entrada, el turno cruzo la
+      // medianoche y la salida cae al dia siguiente (mismo criterio que la base).
+      const fechaSalida = (hora && horaAMinutos(hora) <= horaAMinutos(horaAbierta))
+        ? sumarDiasIso(open.fecha, 1) : open.fecha;
+
+      elements.cierreResumen.innerHTML = !hora
+        ? `<em>Indica la hora de salida para ver qué se va a guardar.</em>`
+        : `<strong>Va a quedar así:</strong>
+           <ul>
+             <li>SALIDA del <b>${escapeHtml(fechaSalida)}</b> a las <b>${escapeHtml(hora)}</b>${escapeHtml(ajusteTxt)}</li>
+             <li>Jornada resultante: <b>${horas != null ? horas + " h" : "—"}</b></li>
+             <li>Motivo: ${motivo ? `<b>${escapeHtml(motivo)}</b>` : "<em>pendiente</em>"}</li>
+             <li>Queda registrada <b>a tu nombre y con la fecha de hoy</b>, marcada como
+                 declarada (no biométrica) y visible en Administración › Verificador de
+                 horarios › Cierres declarados.</li>
+           </ul>`;
+    };
+    pintarResumen();
+    ov.classList.remove("hidden");
+    setTimeout(() => elements.cierreHoraInput.focus(), 50);
+
+    const onChip = (event) => {
+      const chip = event.target.closest(".motivo-chip");
+      if (!chip) return;
+      elements.cierreMotivoInput.value = chip.textContent;   // editable por si detallan mas
+      setMessage(elements.cierreError, "");
+      pintarResumen();
+    };
+    const cleanup = () => {
+      ov.classList.add("hidden");
+      elements.cierreOpciones.removeEventListener("click", onChip);
+      elements.cierreHoraInput.removeEventListener("input", pintarResumen);
+      elements.cierreMotivoInput.removeEventListener("input", pintarResumen);
+      elements.cierreAccept.removeEventListener("click", onAccept);
+      elements.cierreCancel.removeEventListener("click", onCancel);
+    };
+    const onAccept = () => {
+      const hora = elements.cierreHoraInput.value;
+      const motivo = elements.cierreMotivoInput.value.trim();
+      if (!/^\d{2}:\d{2}$/.test(hora)) {
+        setMessage(elements.cierreError, "Indica la hora a la que terminó el turno.", "error");
+        elements.cierreHoraInput.focus();
+        return;
+      }
+      const horas = horasDeJornada(horaAbierta, hora);
+      if (horas !== null && horas > 20) {
+        setMessage(elements.cierreError,
+          `Esa hora daría una jornada de ${horas} h. Verifica que sea correcta.`, "error");
+        elements.cierreHoraInput.focus();
+        return;
+      }
+      if (motivo.length < 4) {
+        setMessage(elements.cierreError,
+          "Escribe por qué no quedó registrada la salida, o elige un motivo de la lista.", "error");
+        elements.cierreMotivoInput.focus();
+        return;
+      }
+      cleanup();
+      resolve({ hora, motivo });
+    };
+    const onCancel = () => { cleanup(); resolve(null); };
+
+    elements.cierreOpciones.addEventListener("click", onChip);
+    elements.cierreHoraInput.addEventListener("input", pintarResumen);
+    elements.cierreMotivoInput.addEventListener("input", pintarResumen);
+    elements.cierreAccept.addEventListener("click", onAccept);
+    elements.cierreCancel.addEventListener("click", onCancel);
+  });
+}
+
+// Cierra el turno anterior en la hora que DECLARA el operario y deja la marca de hoy
 // como ENTRADA. Devuelve true si el turno quedo cerrado.
 async function ofrecerCierreTurnoAnterior(sug) {
   const open = state.openEntrada;
   if (!open?.id) return false;
+  const dni = state.colaborador?.dni || open.dni || normalizeDni(elements.dniInput?.value);
   const horaAbierta = String(open.hora || "").slice(0, 5);
-  const horaTurno = sug?.turno?.hora_entrada || "";
+  const turnoProg = await salidaProgramadaDeEntrada(dni, open);
 
-  const ok = await confirmGraphical(
-    "Turno anterior sin cerrar",
-    `Este conductor tiene una ENTRADA abierta del ${open.fecha} ${horaAbierta} sin salida. `
-    + `Según su programación, ahora está ENTRANDO a su turno de las ${horaTurno}. `
-    + "Se cerrará el turno anterior en su hora programada de salida (queda marcado para "
-    + "revisión de administración) y esta marca se registrará como ENTRADA.",
-    "Cerrar anterior y registrar ENTRADA",
-    "Registrar SALIDA"
-  );
-  if (!ok) return false;
+  const decl = await pedirCierreTurno({
+    open,
+    horaAbierta,
+    turnoProg,
+    horaTurnoHoy: sug?.turno?.hora_entrada || "",
+    nombre: state.colaborador?.nombre || state.csvCandidate?.nombre || ""
+  });
+  if (!decl) return false;
 
   try {
     const { data, error } = await supabaseClient.rpc("cerrar_turno_automatico", {
-      p_entrada_id: open.id, p_hora: null
+      p_entrada_id: open.id, p_hora: decl.hora, p_motivo: decl.motivo
     });
     if (error) throw new Error(error.message);
     if (!data?.ok) {
@@ -3674,11 +4014,13 @@ async function ofrecerCierreTurnoAnterior(sug) {
       return false;
     }
     // El turno quedo cerrado: se recarga el estado para que ya no figure abierto.
-    await loadLastAttendance(state.colaborador?.dni || open.dni);
+    await loadLastAttendance(dni);
     computeOpenEntrada();
+    const ajuste = data.minutos_ajuste;
     setMessage(elements.formMessage,
-      `Turno del ${data.entrada_fecha} cerrado automáticamente a las ${data.hora}. `
-      + "Ahora registra la ENTRADA de hoy.", "success");
+      `Turno del ${data.entrada_fecha} cerrado a las ${data.hora}`
+      + (ajuste ? ` (${Math.abs(ajuste)} min ${ajuste > 0 ? "después" : "antes"} de lo programado)` : "")
+      + `. Motivo: ${decl.motivo}. Ahora registra la ENTRADA de hoy.`, "success");
     return true;
   } catch (e) {
     showAlertModal("No se pudo cerrar el turno anterior", e.message || String(e));
@@ -8718,6 +9060,7 @@ elements.verificadorBuscarButton?.addEventListener("click", cargarVerificador);
 elements.verificadorDiaButton?.addEventListener("click", cargarVerificadorDia);
 elements.verificadorDesfasesButton?.addEventListener("click", cargarVerificadorDesfases);
 elements.verificadorGestoresButton?.addEventListener("click", cargarVerificadorGestores);
+elements.verificadorCierresButton?.addEventListener("click", cargarVerificadorCierres);
 elements.verificadorExportButton?.addEventListener("click", exportarVerificadorCsv);
 elements.verificadorFiltrarButton?.addEventListener("click", () => rerenderVerificador());
 // Al cambiar una fecha se vuelve a consultar sola, respetando el modo activo, para
@@ -8728,6 +9071,7 @@ elements.verificadorFiltrarButton?.addEventListener("click", () => rerenderVerif
     if (state.verificadorModo === "dia") cargarVerificadorDia();
     else if (state.verificadorModo === "desfases") cargarVerificadorDesfases();
     else if (state.verificadorModo === "gestores") cargarVerificadorGestores();
+    else if (state.verificadorModo === "cierres") cargarVerificadorCierres();
     else cargarVerificador();
   });
 });
