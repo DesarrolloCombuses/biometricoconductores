@@ -1,4 +1,4 @@
-const APP_VERSION = "20260812a-no-bloquear-abierto";
+const APP_VERSION = "20260812b-motivo-desfase";
 const CACHE_NAME = `combuses-asistencia-${APP_VERSION}`;
 const APP_SHELL = [
   "./asistencia-web.html",

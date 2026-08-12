@@ -1145,6 +1145,49 @@ svg {
 }
 .verif-tabla td { vertical-align: top; }
 
+/* ---- Modal de motivo cuando la marca no cuadra con el horario ---- */
+.motivo-modal {
+  text-align: left;
+  max-width: 430px;
+}
+
+.motivo-opciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.motivo-chip {
+  border: 1px solid #cfd4dc;
+  background: #f7f9fb;
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: #33404f;
+}
+.motivo-chip:hover {
+  background: var(--primary, #0a6b3b);
+  border-color: var(--primary, #0a6b3b);
+  color: #fff;
+}
+
+.motivo-campo {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted, #5b6472);
+}
+.motivo-campo input {
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--border, #cfd4dc);
+  border-radius: 8px;
+  font-size: 0.92rem;
+}
+
 /* Tablas anchas (anticipos y excesos): que desplacen solas, sin estirar la pagina. */
 .tabla-scroll {
   overflow-x: auto;

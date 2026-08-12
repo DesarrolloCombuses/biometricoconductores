@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20260812a-no-bloquear-abierto">
+  <link rel="stylesheet" href="./asistencia.css?v=20260812b-motivo-desfase">
 </head>
 <body>
   <main class="shell">
@@ -1550,13 +1550,33 @@
       </div>
     </section>
 
+    <!-- Motivo obligatorio cuando la marca no concuerda con el horario programado.
+         Queda guardado en la observacion de la marca. -->
+    <section id="motivoOverlay" class="process-overlay hidden" aria-modal="true" role="dialog">
+      <div class="process-modal alert-modal motivo-modal">
+        <strong id="motivoTitle">¿Por qué no coincide con el horario?</strong>
+        <p id="motivoText"></p>
+        <div class="motivo-opciones" id="motivoOpciones"></div>
+        <label class="motivo-campo">
+          Detalle
+          <input id="motivoInput" type="text" maxlength="120" autocomplete="off"
+                 placeholder="Ej: estaba en el taller esperando el vehículo">
+        </label>
+        <p id="motivoError" class="message" role="status"></p>
+        <div class="confirm-actions">
+          <button id="motivoCancel" class="secondary" type="button">Cancelar</button>
+          <button id="motivoAccept" class="primary" type="button">Registrar con este motivo</button>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20260812a-no-bloquear-abierto"></script>
+  <script src="./asistencia.js?v=20260812b-motivo-desfase"></script>
 </body>
 </html>
 

@@ -81,6 +81,9 @@ const state = {
   // Sentido que sugiere el HORARIO programado (manda sobre la ultima marca).
   sentidoSegunProgramacion: null,
   sentidoForzadoManual: false,
+  // Motivo que digita quien registra cuando la marca no concuerda con el horario
+  // (p.ej. "estaba en el taller"). Se guarda en la observacion de la marca.
+  motivoDesfase: "",
   // Estado del turno programado que corresponde a este momento (RPC estado_turno_actual).
   // Si viene `completa`, la jornada ya se cumplio y NO se admite otra marca.
   turnoEstado: null,
@@ -231,6 +234,14 @@ const elements = {
   stepPhoto: $("#stepPhoto"),
   stepRegister: $("#stepRegister"),
   observacionInput: $("#observacionInput"),
+  motivoOverlay: $("#motivoOverlay"),
+  motivoTitle: $("#motivoTitle"),
+  motivoText: $("#motivoText"),
+  motivoOpciones: $("#motivoOpciones"),
+  motivoInput: $("#motivoInput"),
+  motivoError: $("#motivoError"),
+  motivoAccept: $("#motivoAccept"),
+  motivoCancel: $("#motivoCancel"),
   celularComprobanteInput: $("#celularComprobanteInput"),
   celularAgendaHint: $("#celularAgendaHint"),
   programacionBanner: $("#programacionBanner"),
@@ -3167,6 +3178,7 @@ function limpiarProgramacion() {
   state.programacionHoy = null;
   state.programacionAvisoVehiculo = "";
   state.programacionAvisoHorario = "";
+  state.motivoDesfase = "";
   state.turnoEstado = null;
   elements.programacionBanner?.classList.add("hidden");
 }
@@ -3567,14 +3579,18 @@ async function confirmarHorarioProgramado(sentido) {
   if (state.programacionAvisoHorario === clave) return true;
   state.programacionAvisoHorario = clave;
 
-  return confirmGraphical(
-    "Horario distinto al programado",
-    `El horario programado de ${etiqueta.toLowerCase()} de hoy es ${horaRef}, `
-    + `pero estás marcando ${etiqueta} a las ${horaMarca} (${desfase} de lo programado). `
-    + `¿Deseas registrar la marca así?`,
-    "Sí, registrar",
-    "Revisar hora"
+  // En vez de un si/no suelto se pide el MOTIVO: asi la novedad queda explicada
+  // en la marca (p.ej. "estaba en el taller") y no como un desfase sin razon.
+  const motivo = await pedirMotivoDesfase(
+    "¿Por qué no coincide con el horario?",
+    `El horario programado de ${etiqueta.toLowerCase()} es ${horaRef}, pero se está marcando `
+    + `${etiqueta} a las ${horaMarca} (${desfase} de lo programado). `
+    + "Escribe el motivo para poder registrar la marca."
   );
+  if (motivo === null) return false;   // canceló: revisa la hora
+
+  state.motivoDesfase = `${etiqueta} ${horaMarca} vs programada ${horaRef} (${desfase}): ${motivo}`;
+  return true;
 }
 
 /* --------------------------------------------------------------------------
@@ -5058,7 +5074,7 @@ async function submitAttendance(event) {
       ubicacion_precision_m: location.precision || null,
       origen,
       registrado_por: state.user.id,
-      observacion: [userObservation, faceObservation, driverObservation, mobileObservation, fotoWarning, bukObservation].filter(Boolean).join(" | ") || null,
+      observacion: [state.motivoDesfase, userObservation, faceObservation, driverObservation, mobileObservation, fotoWarning, bukObservation].filter(Boolean).join(" | ") || null,
       celular_comprobante: normalizarCelularCo(elements.celularComprobanteInput?.value)
         || elements.celularComprobanteInput?.value.trim() || null,
       enviado_buk: bukOk,
@@ -5178,6 +5194,7 @@ async function submitAttendance(event) {
     elements.dniInput.value = colaboradorDni;
     await loadLastAttendance(colaboradorDni);
     state.sentidoForzadoManual = false;
+    state.motivoDesfase = "";
     state.nextSentido = getNextSentidoFromLastAttendance();
     // Si con esta marca la jornada quedo completa, el aviso lo debe reflejar de una.
     await cargarEstadoTurno(colaboradorDni);
@@ -6176,6 +6193,70 @@ function confirmGraphical(title, text, acceptLabel = "Confirmar", cancelLabel = 
 
     elements.confirmAccept.addEventListener("click", onAccept);
     elements.confirmCancel.addEventListener("click", onCancel);
+  });
+}
+
+// Motivos frecuentes por los que una marca no cuadra con el horario programado.
+// Se ofrecen como botones para no obligar a escribir, pero se puede detallar a mano.
+const MOTIVOS_DESFASE = [
+  "Estaba en el taller",
+  "Vehículo varado en ruta",
+  "Relevo llegó tarde",
+  "Demora por tráfico o novedad en vía",
+  "Apoyo a otro turno",
+  "Olvidó marcar a tiempo"
+];
+
+// Pide el MOTIVO de un desfase y lo devuelve como texto, o null si se cancela.
+// Es obligatorio: sin motivo no se registra, para que la novedad quede explicada.
+function pedirMotivoDesfase(titulo, texto) {
+  return new Promise((resolve) => {
+    const ov = elements.motivoOverlay;
+    if (!ov) { resolve(""); return; }   // sin modal en el DOM: no se bloquea el registro
+
+    elements.motivoTitle.textContent = titulo;
+    elements.motivoText.textContent = texto;
+    elements.motivoInput.value = "";
+    setMessage(elements.motivoError, "");
+    elements.motivoOpciones.innerHTML = MOTIVOS_DESFASE.map((m) =>
+      `<button type="button" class="motivo-chip">${escapeHtml(m)}</button>`).join("");
+    ov.classList.remove("hidden");
+    setTimeout(() => elements.motivoInput.focus(), 50);
+
+    const onChip = (event) => {
+      const chip = event.target.closest(".motivo-chip");
+      if (!chip) return;
+      // El chip llena el campo: queda editable por si quieren detallar mas.
+      elements.motivoInput.value = chip.textContent;
+      setMessage(elements.motivoError, "");
+      elements.motivoInput.focus();
+    };
+    const cleanup = () => {
+      ov.classList.add("hidden");
+      elements.motivoOpciones.removeEventListener("click", onChip);
+      elements.motivoAccept.removeEventListener("click", onAccept);
+      elements.motivoCancel.removeEventListener("click", onCancel);
+      elements.motivoInput.removeEventListener("keydown", onKey);
+    };
+    const onAccept = () => {
+      const val = elements.motivoInput.value.trim();
+      if (val.length < 4) {
+        setMessage(elements.motivoError, "Escribe el motivo o elige uno de la lista.", "error");
+        elements.motivoInput.focus();
+        return;
+      }
+      cleanup();
+      resolve(val);
+    };
+    const onCancel = () => { cleanup(); resolve(null); };
+    const onKey = (event) => {
+      if (event.key === "Enter") { event.preventDefault(); onAccept(); }
+    };
+
+    elements.motivoOpciones.addEventListener("click", onChip);
+    elements.motivoAccept.addEventListener("click", onAccept);
+    elements.motivoCancel.addEventListener("click", onCancel);
+    elements.motivoInput.addEventListener("keydown", onKey);
   });
 }
 
