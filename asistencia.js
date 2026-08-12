@@ -3872,8 +3872,8 @@ function renderProgramacionBanner() {
       <div class="prog-cumplida">
         <span><small>Entrada abierta</small><strong>${escapeHtml(c.hora || "--:--")}</strong>
           <em>${escapeHtml(c.fecha)}</em></span>
-        <span><small>Salida programada</small><strong>${escapeHtml(c.horaProg || "--:--")}</strong>
-          <em>propuesta</em></span>
+        <span><small>Salida sugerida</small><strong>${escapeHtml(c.horaProg || "--:--")}</strong>
+          <em>${c.horaProg ? "por confirmar" : "hay que preguntarla"}</em></span>
         <span><small>Salida real</small><strong>—</strong>
           <em>sin registrar</em></span>
       </div>
@@ -4248,6 +4248,11 @@ const MOTIVOS_SIN_CIERRE = [
 
 const LIMITE_HORAS_JORNADA = 16;
 
+// Tope duro del dialogo de cierre. No es el limite de Buk (16 h): una jornada puede
+// quedarse abierta y cerrarse legitimamente mas tarde. Pero pasado el doble del maximo
+// casi siempre es un error de digitacion, asi que ahi si se para y se pregunta.
+const CIERRE_HORAS_MAX = 20;
+
 const MOTIVOS_JORNADA_EXTENDIDA = [
   "El relevo no llegó y le tocó seguir",
   "Vehículo varado, esperó el auxilio",
@@ -4312,26 +4317,21 @@ async function explicarJornadaExcedida(salidaId, motivo) {
   }
 }
 
-// Hora de salida PROGRAMADA del turno al que pertenece una entrada abierta. Es la
-// propuesta que se le muestra al operario (editable) y la referencia contra la que
-// despues se mide cuanto se aparto lo que declaro.
-async function salidaProgramadaDeEntrada(dni, open) {
-  if (!dni || !open?.fecha) return null;
+// Hora de salida que se le propone al operario, con su procedencia.
+//
+// Antes se cogia el turno programado "mas cercano" a la entrada, sin limite de
+// distancia: para una entrada de las 15:38 se tomaba un turno que empieza a las 05:00
+// -a 638 minutos- y se proponia su salida de las 13:00, o sea una jornada de 22,4 h.
+// La funcion de la base solo acepta un turno a menos de 3 h de la marca real y, si no
+// lo hay, mira lo que esa persona hace de verdad cuando entra a esa hora.
+async function sugerenciaCierre(entradaId) {
+  if (!entradaId) return null;
   try {
-    const { data, error } = await supabaseClient.rpc("obtener_programacion_dia", {
-      p_dni: dni, p_fecha: open.fecha
+    const { data, error } = await supabaseClient.rpc("sugerencia_cierre_turno", {
+      p_entrada_id: entradaId
     });
-    if (error || !data?.ok || !data.existe) return null;
-
-    const horaEnt = String(open.hora || "").slice(0, 5);
-    const minEnt = horaAMinutos(horaEnt);
-    let mejor = null;
-    for (const t of (data.turnos || [])) {
-      if (!t.hora_salida || !t.hora_entrada) continue;
-      const d = minEnt === null ? 0 : Math.abs(horaAMinutos(t.hora_entrada) - minEnt);
-      if (!mejor || d < mejor.d) mejor = { d, turno: t };
-    }
-    return mejor?.turno || null;
+    if (error || !data?.ok) return null;
+    return data;
   } catch {
     return null;
   }
@@ -4363,12 +4363,19 @@ function horasDeJornada(horaEntrada, horaSalida) {
 
 // Pide al operario que DECLARE la hora real de salida y el motivo por el que no quedo
 // registrada. Devuelve {hora, motivo} o null si prefiere registrar la salida ahora.
-function pedirCierreTurno({ open, horaAbierta, turnoProg, horaTurnoHoy, nombre }) {
+function pedirCierreTurno({ open, horaAbierta, sugerencia, horaTurnoHoy, nombre }) {
   return new Promise((resolve) => {
     const ov = elements.cierreOverlay;
     if (!ov) { resolve(null); return; }
 
-    const horaProg = String(turnoProg?.hora_salida || "").slice(0, 5);
+    // Se propone la hora programada solo si el turno de verdad corresponde a esta
+    // entrada; si no, lo que esa persona hace cuando entra a esa hora. Y si no hay
+    // ninguna de las dos, el campo queda VACIO: mejor preguntar que inventar.
+    const prog = sugerencia?.programada || null;
+    const hab = sugerencia?.habitual || null;
+    const horaProg = prog?.hora || "";
+    const propuesta = horaProg || hab?.hora || "";
+
     elements.cierreTitle.textContent = "Falta cerrar un turno";
     elements.cierreText.textContent =
       `${nombre || "Esta persona"} marcó ENTRADA el ${open.fecha} a las ${horaAbierta} `
@@ -4378,10 +4385,16 @@ function pedirCierreTurno({ open, horaAbierta, turnoProg, horaTurnoHoy, nombre }
           : "")
       + "Ese turno tiene que quedar cerrado antes de registrar la entrada de hoy.";
 
-    elements.cierreHoraInput.value = horaProg || "";
-    elements.cierreHoraHint.textContent = horaProg
-      ? `Se propone la hora programada de salida (${horaProg}). Corrígela si terminó a otra hora.`
-      : "Ese turno no tiene hora programada de salida: escribe la hora real a la que terminó.";
+    elements.cierreHoraInput.value = propuesta;
+    elements.cierreHoraHint.textContent = prog
+      ? `Se propone la salida programada de su turno ${prog.turno} (${prog.hora}). `
+        + "Corrígela si terminó a otra hora."
+      : hab
+        ? `Ese turno no tiene hora programada. Se propone las ${hab.hora}: es la hora a la que `
+          + `salió el ${hab.fecha_ref}, la última vez que entró a una hora parecida `
+          + `(jornada de ${hab.horas} h). Confírmala o corrígela.`
+        : "No hay hora programada ni un antecedente parecido: pregunta a qué hora terminó "
+          + "de verdad y escríbela.";
     elements.cierreMotivoInput.value = "";
     setMessage(elements.cierreError, "");
     elements.cierreOpciones.innerHTML = MOTIVOS_SIN_CIERRE.map((m) =>
@@ -4425,6 +4438,10 @@ function pedirCierreTurno({ open, horaAbierta, turnoProg, horaTurnoHoy, nombre }
                  horarios › Cierres declarados.</li>
            </ul>`;
     };
+    // Al editar se repinta el resumen Y se borra el error: dejarlo puesto mostraba
+    // una cifra vieja junto a la nueva, con dos numeros distintos en pantalla.
+    const alEditar = () => { setMessage(elements.cierreError, ""); pintarResumen(); };
+
     pintarResumen();
     ov.classList.remove("hidden");
     setTimeout(() => elements.cierreHoraInput.focus(), 50);
@@ -4439,8 +4456,8 @@ function pedirCierreTurno({ open, horaAbierta, turnoProg, horaTurnoHoy, nombre }
     const cleanup = () => {
       ov.classList.add("hidden");
       elements.cierreOpciones.removeEventListener("click", onChip);
-      elements.cierreHoraInput.removeEventListener("input", pintarResumen);
-      elements.cierreMotivoInput.removeEventListener("input", pintarResumen);
+      elements.cierreHoraInput.removeEventListener("input", alEditar);
+      elements.cierreMotivoInput.removeEventListener("input", alEditar);
       elements.cierreAccept.removeEventListener("click", onAccept);
       elements.cierreCancel.removeEventListener("click", onCancel);
     };
@@ -4453,9 +4470,11 @@ function pedirCierreTurno({ open, horaAbierta, turnoProg, horaTurnoHoy, nombre }
         return;
       }
       const horas = horasDeJornada(horaAbierta, hora);
-      if (horas !== null && horas > 20) {
+      if (horas !== null && horas > CIERRE_HORAS_MAX) {
         setMessage(elements.cierreError,
-          `Esa hora daría una jornada de ${horas} h. Verifica que sea correcta.`, "error");
+          `Con esa hora la jornada daría ${horas} h, y la entrada fue a las ${horaAbierta}. `
+          + `Eso es más del doble del máximo de ${LIMITE_HORAS_JORNADA} h de Buk: `
+          + "revisa la hora antes de continuar.", "error");
         elements.cierreHoraInput.focus();
         return;
       }
@@ -4471,8 +4490,8 @@ function pedirCierreTurno({ open, horaAbierta, turnoProg, horaTurnoHoy, nombre }
     const onCancel = () => { cleanup(); resolve(null); };
 
     elements.cierreOpciones.addEventListener("click", onChip);
-    elements.cierreHoraInput.addEventListener("input", pintarResumen);
-    elements.cierreMotivoInput.addEventListener("input", pintarResumen);
+    elements.cierreHoraInput.addEventListener("input", alEditar);
+    elements.cierreMotivoInput.addEventListener("input", alEditar);
     elements.cierreAccept.addEventListener("click", onAccept);
     elements.cierreCancel.addEventListener("click", onCancel);
   });
@@ -4485,11 +4504,11 @@ async function ofrecerCierreTurnoAnterior(sug) {
   if (!open?.id) return false;
   const dni = state.colaborador?.dni || open.dni || normalizeDni(elements.dniInput?.value);
   const horaAbierta = String(open.hora || "").slice(0, 5);
-  const turnoProg = await salidaProgramadaDeEntrada(dni, open);
+  const sugerencia = await sugerenciaCierre(open.id);
 
   const nombre = state.colaborador?.nombre || state.csvCandidate?.nombre || "";
   const decl = await pedirCierreTurno({
-    open, horaAbierta, turnoProg, horaTurnoHoy: sug?.turno?.hora_entrada || "", nombre
+    open, horaAbierta, sugerencia, horaTurnoHoy: sug?.turno?.hora_entrada || "", nombre
   });
 
   // Si no lo declara, el turno pendiente queda marcado y la ENTRADA de hoy no se
@@ -4498,7 +4517,7 @@ async function ofrecerCierreTurnoAnterior(sug) {
     state.cierrePendiente = {
       fecha: open.fecha,
       hora: horaAbierta,
-      horaProg: String(turnoProg?.hora_salida || "").slice(0, 5),
+      horaProg: sugerencia?.programada?.hora || sugerencia?.habitual?.hora || "",
       nombre
     };
     renderProgramacionBanner();
