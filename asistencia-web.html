@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20260812e-cierre-declarado">
+  <link rel="stylesheet" href="./asistencia.css?v=20260812f-cierre-obligatorio">
 </head>
 <body>
   <main class="shell">
@@ -1607,9 +1607,13 @@
         </div>
 
         <div class="cierre-resumen" id="cierreResumen"></div>
+        <p class="cierre-obligatorio">
+          <i data-lucide="lock"></i>
+          Mientras este turno no quede cerrado <strong>no se puede registrar la entrada de hoy</strong>.
+        </p>
         <p id="cierreError" class="message" role="status"></p>
         <div class="confirm-actions">
-          <button id="cierreCancel" class="secondary" type="button">Registrar SALIDA aquí</button>
+          <button id="cierreCancel" class="secondary" type="button">Ahora no</button>
           <button id="cierreAccept" class="primary" type="button">Cerrar turno y registrar ENTRADA</button>
         </div>
       </div>
@@ -1621,7 +1625,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20260812e-cierre-declarado"></script>
+  <script src="./asistencia.js?v=20260812f-cierre-obligatorio"></script>
 </body>
 </html>
 

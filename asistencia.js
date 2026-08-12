@@ -101,6 +101,8 @@ const state = {
   verificadorDesfasesData: null,
   verificadorGestoresData: null,
   verificadorCierresData: null,
+  // Turno anterior sin cerrar que hay que declarar antes de admitir la ENTRADA de hoy.
+  cierrePendiente: null,
   horarioLoaded: false,
   horarioFilas: [],
   base3Loaded: false,
@@ -3517,6 +3519,40 @@ function renderProgramacionBanner() {
     return;
   }
 
+  // ---- Turno anterior sin cerrar: no se admite la ENTRADA hasta declararlo ----
+  // Va antes que todo lo demas porque es un bloqueo, no un aviso: mientras el turno
+  // viejo siga abierto, cualquier entrada nueva deja la salida perdida para siempre.
+  if (state.cierrePendiente && state.openEntrada) {
+    const c = state.cierrePendiente;
+    banner.className = "programacion-banner bloqueado";
+    banner.innerHTML = `
+      <div class="programacion-titulo">
+        <i data-lucide="lock"></i>
+        Falta cerrar el turno del ${escapeHtml(c.fecha)}
+        <span class="prog-chip bloqueo">Entrada bloqueada</span>
+      </div>
+      <div class="prog-cumplida">
+        <span><small>Entrada abierta</small><strong>${escapeHtml(c.hora || "--:--")}</strong>
+          <em>${escapeHtml(c.fecha)}</em></span>
+        <span><small>Salida programada</small><strong>${escapeHtml(c.horaProg || "--:--")}</strong>
+          <em>propuesta</em></span>
+        <span><small>Salida real</small><strong>—</strong>
+          <em>sin registrar</em></span>
+      </div>
+      <div class="programacion-estado">
+        Esta persona <strong>entró y nunca marcó la salida</strong>. Hasta que ese turno no
+        quede cerrado <strong>no se puede registrar la entrada de hoy</strong>: quedarían dos
+        turnos abiertos y la salida pendiente se perdería.
+      </div>
+      <button id="cierrePendienteButton" class="primary wide" type="button">
+        <i data-lucide="clock"></i>
+        Declarar la hora de salida y cerrar
+      </button>`;
+    banner.classList.remove("hidden");
+    if (window.lucide?.createIcons) window.lucide.createIcons();
+    return;
+  }
+
   // ---- Jornada del turno YA cumplida: se bloquea otra marca ----
   if (jornadaYaCumplida()) {
     const t = state.turnoEstado;
@@ -3889,7 +3925,7 @@ function pedirCierreTurno({ open, horaAbierta, turnoProg, horaTurnoHoy, nombre }
       + (horaTurnoHoy
           ? `Según la programación, ahora está llegando a su turno de las ${horaTurnoHoy}. `
           : "")
-      + "Antes de registrar esta entrada hay que cerrar el turno pendiente.";
+      + "Ese turno tiene que quedar cerrado antes de registrar la entrada de hoy.";
 
     elements.cierreHoraInput.value = horaProg || "";
     elements.cierreHoraHint.textContent = horaProg
@@ -3991,14 +4027,26 @@ async function ofrecerCierreTurnoAnterior(sug) {
   const horaAbierta = String(open.hora || "").slice(0, 5);
   const turnoProg = await salidaProgramadaDeEntrada(dni, open);
 
+  const nombre = state.colaborador?.nombre || state.csvCandidate?.nombre || "";
   const decl = await pedirCierreTurno({
-    open,
-    horaAbierta,
-    turnoProg,
-    horaTurnoHoy: sug?.turno?.hora_entrada || "",
-    nombre: state.colaborador?.nombre || state.csvCandidate?.nombre || ""
+    open, horaAbierta, turnoProg, horaTurnoHoy: sug?.turno?.hora_entrada || "", nombre
   });
-  if (!decl) return false;
+
+  // Si no lo declara, el turno pendiente queda marcado y la ENTRADA de hoy no se
+  // admite: registrarla dejaria dos turnos abiertos y la salida vieja se perderia.
+  if (!decl) {
+    state.cierrePendiente = {
+      fecha: open.fecha,
+      hora: horaAbierta,
+      horaProg: String(turnoProg?.hora_salida || "").slice(0, 5),
+      nombre
+    };
+    renderProgramacionBanner();
+    setMessage(elements.formMessage,
+      `No se puede registrar la entrada: falta cerrar el turno del ${open.fecha} `
+      + `(entrada ${horaAbierta} sin salida).`, "error");
+    return false;
+  }
 
   try {
     const { data, error } = await supabaseClient.rpc("cerrar_turno_automatico", {
@@ -4006,16 +4054,22 @@ async function ofrecerCierreTurnoAnterior(sug) {
     });
     if (error) throw new Error(error.message);
     if (!data?.ok) {
+      // Si el turno ya tenia salida, el estado en pantalla estaba viejo: se recarga
+      // en vez de dejar bloqueado a quien si puede marcar.
+      await loadLastAttendance(dni);
+      computeOpenEntrada();
       showAlertModal(
         "No se pudo cerrar el turno anterior",
         `${data?.error || "Error cerrando el turno."} `
-        + "Puedes registrar la SALIDA aquí, o corregirlo desde Administración › Verificador de horarios."
+        + "Revisa el caso en Administración › Verificador de horarios."
       );
       return false;
     }
     // El turno quedo cerrado: se recarga el estado para que ya no figure abierto.
     await loadLastAttendance(dni);
     computeOpenEntrada();
+    state.cierrePendiente = null;
+    renderProgramacionBanner();
     const ajuste = data.minutos_ajuste;
     setMessage(elements.formMessage,
       `Turno del ${data.entrada_fecha} cerrado a las ${data.hora}`
@@ -4068,11 +4122,13 @@ async function resolverSentidoInicial() {
     return;
   }
 
-  // El horario dice que esta LLEGANDO pero arrastra un turno sin cerrar:
-  // se cierra el viejo en vez de invertir el sentido de esta marca.
+  // El horario dice que esta LLEGANDO pero arrastra un turno sin cerrar: se cierra
+  // el viejo en vez de invertir el sentido. Si no lo declaran, el sentido SIGUE
+  // siendo entrada y queda bloqueado (state.cierrePendiente): pasar a salida seria
+  // cerrar el turno viejo con la hora de hoy, que es justo el error a evitar.
   if (sug.sentido === "entrada") {
-    const cerrado = await ofrecerCierreTurnoAnterior(sug);
-    state.nextSentido = cerrado ? "entrada" : "salida";
+    await ofrecerCierreTurnoAnterior(sug);
+    state.nextSentido = "entrada";
     return;
   }
 
@@ -5151,7 +5207,7 @@ async function submitAttendance(event) {
   // si la pagina llevaba rato abierta o si alguien mas registro entre tanto.
   try {
     const { data: estado } = await supabaseClient.rpc("estado_turno_actual", {
-      p_dni: dni, p_momento: null
+      p_dni: dni, p_momento: momentoReporte()
     });
     if (estado?.ok && estado.existe && estado.completa) {
       state.turnoEstado = estado;
@@ -5170,6 +5226,17 @@ async function submitAttendance(event) {
     }
   } catch (e) {
     console.warn("No se pudo revalidar el estado del turno:", e?.message || e);
+  }
+
+  // Turno anterior sin cerrar: se corta aqui, antes de pedir foto y ubicacion, para
+  // no hacerle recorrer todo el proceso a quien igual no va a poder registrar.
+  if (state.nextSentido === "entrada" && state.openEntrada && state.cierrePendiente) {
+    const cerrado = await ofrecerCierreTurnoAnterior(state.sentidoSegunProgramacion);
+    if (!cerrado) {
+      renderProgramacionBanner();
+      elements.programacionBanner?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
   }
 
   if (!state.faceValidated || !state.compressedFile) {
@@ -5256,7 +5323,11 @@ async function submitAttendance(event) {
 
   const sentidoConfirmado = await confirmarCoherenciaTurno(state.nextSentido);
   if (!sentidoConfirmado) {
-    setMessage(elements.formMessage, "Registro cancelado. Revisa el tipo de marca (entrada o salida) segun corresponda.", "");
+    // Con turno anterior sin cerrar el mensaje ya lo puso ofrecerCierreTurnoAnterior:
+    // decir "revisa el tipo de marca" ahi confundiria, porque el tipo es el correcto.
+    if (!(state.cierrePendiente && state.openEntrada)) {
+      setMessage(elements.formMessage, "Registro cancelado. Revisa el tipo de marca (entrada o salida) segun corresponda.", "");
+    }
     return;
   }
 
@@ -5939,6 +6010,27 @@ function renderSentidoSelector() {
 // sistema dedujo del horario / la ultima marca, y queda anotado en la observacion.
 async function cambiarSentidoManual(sentido) {
   if (sentido === state.nextSentido) return;
+
+  // Con un turno pendiente por declarar, pasar a SALIDA a mano lo cerraria con la
+  // hora de AHORA en vez de la real. Es la misma brecha, por otra puerta: se ofrece
+  // la declaracion en su lugar.
+  if (sentido === "salida" && state.cierrePendiente && state.openEntrada) {
+    const c = state.cierrePendiente;
+    const ok = await confirmGraphical(
+      "Ese turno hay que declararlo",
+      `La entrada abierta es del ${c.fecha} a las ${c.hora}. Si registras una SALIDA ahora, `
+      + "ese turno quedaría cerrado con la hora de hoy y la jornada saldría descuadrada. "
+      + "Declara a qué hora terminó de verdad y por qué no quedó la marca.",
+      "Declarar la hora de salida",
+      "Cancelar"
+    );
+    if (ok) {
+      const cerrado = await ofrecerCierreTurnoAnterior(state.sentidoSegunProgramacion);
+      if (cerrado) { setSentido("entrada"); }
+    }
+    return;
+  }
+
   const prog = state.sentidoSegunProgramacion;
   const motivo = (prog && prog.dist <= SENTIDO_PROG_MAX_MIN)
     ? `Su turno programado indica ${prog.sentido.toUpperCase()}`
@@ -6100,6 +6192,8 @@ function computeOpenEntrada() {
     state.openEntrada = state.lastAttendance;
   } else {
     state.openEntrada = null;
+    // Sin turno abierto no queda nada pendiente por declarar: se levanta el bloqueo.
+    state.cierrePendiente = null;
   }
 }
 
@@ -6145,13 +6239,13 @@ async function confirmarCoherenciaTurno(sentido) {
   // muestra un modal explicando la situacion y ofreciendo la accion correcta.
   // Devuelve el sentido con el que continuar, o null si el usuario cancela.
   if (sentido === "entrada" && state.openEntrada) {
-    // No se puede tener dos entradas abiertas. En vez de obligar a invertir el
-    // sentido, se ofrece cerrar el turno viejo en su hora programada.
+    // No se puede tener dos entradas abiertas. Hay que declarar el cierre del turno
+    // viejo; si no lo hacen, la marca NO se registra. Antes se pasaba a SALIDA sola,
+    // pero eso cerraba el turno de ayer con la hora de hoy: el error que perseguimos.
     const cerrado = await ofrecerCierreTurnoAnterior(state.sentidoSegunProgramacion);
     if (cerrado) return "entrada";
     if (!state.openEntrada) return "entrada";
-    setSentido("salida");
-    return "salida";
+    return null;
   }
 
   if (sentido === "salida" && !state.openEntrada) {
@@ -9059,6 +9153,19 @@ elements.jornadasFiltros?.addEventListener("click", (event) => {
 elements.verificadorBuscarButton?.addEventListener("click", cargarVerificador);
 elements.verificadorDiaButton?.addEventListener("click", cargarVerificadorDia);
 elements.verificadorDesfasesButton?.addEventListener("click", cargarVerificadorDesfases);
+// El banner de "falta cerrar el turno" trae el boton para retomar la declaracion:
+// se bloqueo la entrada, pero la salida siempre queda a un clic de distancia.
+elements.programacionBanner?.addEventListener("click", async (event) => {
+  if (!event.target.closest("#cierrePendienteButton")) return;
+  const cerrado = await ofrecerCierreTurnoAnterior(state.sentidoSegunProgramacion);
+  if (cerrado) {
+    state.nextSentido = "entrada";
+    renderSentidoSelector();
+    renderProgramacionBanner();
+    renderTurnoStatusBanner();
+  }
+});
+
 elements.verificadorGestoresButton?.addEventListener("click", cargarVerificadorGestores);
 elements.verificadorCierresButton?.addEventListener("click", cargarVerificadorCierres);
 elements.verificadorExportButton?.addEventListener("click", exportarVerificadorCsv);

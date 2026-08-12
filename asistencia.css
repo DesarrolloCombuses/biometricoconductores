@@ -1247,6 +1247,24 @@ svg {
   color: #1f2937;
 }
 
+/* El cierre no es opcional: se dice de frente, junto a los botones. */
+.cierre-obligatorio {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fdecec;
+  color: #8a1020;
+  font-size: 0.8rem;
+}
+.cierre-obligatorio svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+}
+
 .cierre-resumen {
   background: #f2f7f4;
   border: 1px solid #cfe3d7;
