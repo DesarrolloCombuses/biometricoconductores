@@ -3084,6 +3084,13 @@ function updateVehicleHint() {
     hint.style.color = "#b00020";
     hint.style.fontWeight = "700";
     elements.vehicleInput.classList.add("invalid");
+  } else if (state.csvCandidate && !turnoProgramadoActual()) {
+    // Sin programacion del dia no hay vehiculo asignado que exigir: se avisa que
+    // el campo es opcional para que no parezca que falta llenarlo.
+    hint.textContent = "Sin turno programado hoy: el vehículo es opcional, déjalo vacío si no lo sabes.";
+    hint.style.color = "";
+    hint.style.fontWeight = "";
+    elements.vehicleInput.classList.remove("invalid");
   } else {
     hint.textContent = "Selecciona el interno asignado para hoy.";
     hint.style.color = "";
@@ -3932,6 +3939,7 @@ async function buscarColaborador() {
   await cargarEstadoTurno(dni);
   await resolverSentidoInicial();
   renderSentidoSelector();
+  updateVehicleHint();   // ya se sabe si hay programacion: el vehiculo puede ser opcional
   const faceStatus = state.isDriverCandidate
     ? (data?.rostro_enrolado ? "Conductor con rostro enrolado: se intentara validacion biometrica." : "Conductor sin rostro enrolado: se intentara detectar rostro.")
     : "Foto obligatoria como evidencia. Biometria no requerida para este cargo.";
@@ -4824,15 +4832,20 @@ async function submitAttendance(event) {
   }
 
   if (state.isDriverCandidate) {
+    // Sin programacion del dia el vehiculo NO se exige: la app no sabe cual le
+    // corresponde (no hay de donde autocompletarlo) y quien registra tampoco tiene
+    // como saberlo. Exigirlo dejaba al conductor sin poder marcar.
+    const sinProgramacion = !turnoProgramadoActual();
     const selectedVehicle = getSelectedVehicle();
-    if (!selectedVehicle?.m_id) {
+
+    if (!selectedVehicle?.m_id && !sinProgramacion) {
       setMessage(elements.formMessage, "Falta seleccionar el vehiculo. Escribe el interno o placa y elige una opcion de la lista.", "error");
       elements.vehicleInput.classList.add("invalid");
       elements.vehicleInput.focus();
       elements.vehicleInput.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    if (!elements.baseInput.value.trim()) {
+    if (!elements.baseInput.value.trim() && !sinProgramacion) {
       setMessage(elements.formMessage, "Falta la base operativa del conductor.", "error");
       elements.baseInput.classList.add("invalid");
       elements.baseInput.focus();
@@ -4848,7 +4861,9 @@ async function submitAttendance(event) {
       return;
     }
 
-    if (!state.attendanceSonarDriver?.dr_id) {
+    // El driverId solo hace falta si va a haber asignacion en Sonar, o sea si hay
+    // vehiculo. Sin vehiculo no se asigna nada y no tiene por que bloquear la marca.
+    if (selectedVehicle?.m_id && !state.attendanceSonarDriver?.dr_id) {
       setMessage(elements.formMessage, "No se pudo preparar el driverId de Sonar para este conductor.", "error");
       return;
     }
