@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20260722f-mapa-marcas">
+  <link rel="stylesheet" href="./asistencia.css?v=20260806b-gestores">
 </head>
 <body>
   <main class="shell">
@@ -427,6 +427,10 @@
           <button class="admin-subtab" type="button" data-admin-tab="jornadas-anomalas" role="tab">
             <i data-lucide="alert-triangle"></i>
             Fuera de horario
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="verificador" role="tab">
+            <i data-lucide="clock"></i>
+            Verificador de horarios
           </button>
           <button class="admin-subtab" type="button" data-admin-tab="horario" role="tab">
             <i data-lucide="calendar-days"></i>
@@ -1109,6 +1113,10 @@
                 <i data-lucide="search"></i>
                 Consultar
               </button>
+              <button id="jornadasExportButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Exportar Excel
+              </button>
             </div>
           </div>
 
@@ -1122,14 +1130,87 @@
 
           <div class="jornadas-filtros" id="jornadasFiltros"></div>
           <div id="jornadasTotales" class="puntualidad-totales"></div>
-          <div id="jornadasResumen" class="puntualidad-lista"></div>
 
-          <details id="jornadasDetalleBox" class="puntualidad-detalle hidden">
-            <summary>Ver evento por evento</summary>
+          <div id="jornadasDetalleBox" class="hidden">
+            <h3 class="jornadas-subtitulo">Detalle para corregir (entrada, salida y turno)</h3>
             <div id="jornadasDetalle" class="puntualidad-lista"></div>
+          </div>
+
+          <details id="jornadasResumenBox" class="puntualidad-detalle hidden">
+            <summary>Ver resumen por conductor</summary>
+            <div id="jornadasResumen" class="puntualidad-lista"></div>
           </details>
 
           <p id="jornadasMessage" class="message" role="status"></p>
+        </section>
+        </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="verificador">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Verificador de horarios</h2>
+              <p id="verificadorStatus">Revisa las jornadas contra la programación y corrige la hora de ingreso o salida aquí mismo.</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="verificadorDesdeInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="verificadorHastaInput" type="date">
+              </label>
+              <label class="search-field">
+                Buscar
+                <input id="verificadorBuscarInput" type="text" autocomplete="off"
+                       placeholder="Nombre, cédula o vehículo">
+              </label>
+              <button id="verificadorFiltrarButton" class="secondary" type="button">
+                <i data-lucide="search"></i>
+                Buscar
+              </button>
+              <button id="verificadorBuscarButton" class="primary" type="button">
+                <i data-lucide="alert-triangle"></i>
+                Ver errores
+              </button>
+              <button id="verificadorDiaButton" class="primary" type="button">
+                <i data-lucide="calendar-check"></i>
+                Ver día completo
+              </button>
+              <button id="verificadorDesfasesButton" class="primary" type="button">
+                <i data-lucide="timer"></i>
+                Anticipos y excesos
+              </button>
+              <button id="verificadorGestoresButton" class="primary" type="button">
+                <i data-lucide="user-check"></i>
+                Gestores y auxiliares
+              </button>
+              <button id="verificadorExportButton" class="secondary" type="button">
+                <i data-lucide="download"></i>
+                Exportar Excel
+              </button>
+            </div>
+          </div>
+
+          <p class="field-hint">
+            <strong>Ver errores:</strong> solo las jornadas con novedad en el rango (sentido
+            invertido, turno cambiado, fuera de ventana, sin cerrar o duración rara).
+            <strong>Ver día completo:</strong> TODOS los conductores programados de la fecha
+            <em>«Hasta»</em>, con su turno, la hora programada y la que marcaron. En ambos modos
+            puedes editar la hora de ingreso o salida y guardar para corregir.
+            <strong>Anticipos y excesos:</strong> quién entra minutos u horas antes de su turno
+            y quién cierra después de su hora fin, con el ranking por conductor.
+            <strong>Gestores y auxiliares:</strong> el personal sin programación (gestores de
+            servicio y de movilidad, auxiliares de control). Como rotan turno no hay horario
+            contra el cual compararlos, así que se valida la jornada: turnos sin cerrar,
+            duraciones imposibles y marcas dobles.
+          </p>
+
+          <div class="jornadas-filtros" id="verificadorFiltros"></div>
+          <div id="verificadorTotales" class="puntualidad-totales"></div>
+          <div id="verificadorDetalle" class="puntualidad-lista"></div>
+          <p id="verificadorMessage" class="message" role="status"></p>
         </section>
         </div>
 
@@ -1475,7 +1556,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20260722f-mapa-marcas"></script>
+  <script src="./asistencia.js?v=20260806b-gestores"></script>
 </body>
 </html>
 

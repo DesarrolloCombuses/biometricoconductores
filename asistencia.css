@@ -827,6 +827,177 @@ svg {
   margin-top: 6px;
 }
 
+/* ---- Aviso grafico del turno programado ---- */
+.programacion-banner.info {
+  border-color: #bcd4ea;
+  background: #eef5fc;
+}
+
+/* Anuncio automatico: lo primero que ve quien marca. */
+.prog-anuncio {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  color: #fff;
+}
+.prog-anuncio.es-entrada { background: linear-gradient(135deg, #0a6b3b, #129050); }
+.prog-anuncio.es-salida  { background: linear-gradient(135deg, #b3480d, #d4670f); }
+.prog-anuncio i {
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+.prog-anuncio strong {
+  display: block;
+  font-size: 1.06rem;
+  letter-spacing: 0.3px;
+  line-height: 1.2;
+}
+.prog-anuncio small {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+  opacity: 0.92;
+}
+.prog-anuncio small strong {
+  display: inline;
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.prog-registrando {
+  font-weight: 600;
+  font-size: 0.74rem;
+  letter-spacing: 0.4px;
+  color: var(--muted, #5b6472);
+  background: #fff;
+  border: 1px solid #d8dee6;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.prog-chip {
+  margin-left: auto;
+  font-size: 0.74rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 9px;
+  white-space: nowrap;
+}
+.prog-chip.ok     { background: #dcf5e6; color: #0a6b3b; }
+.prog-chip.tarde  { background: #fdecec; color: #b00020; }
+.prog-chip.neutro { background: #eceff3; color: #4a5261; }
+.prog-chip.bloqueo { background: #4a5261; color: #fff; }
+
+/* Jornada ya cumplida: no admite mas marcas. */
+.programacion-banner.bloqueado {
+  border-color: #b9c0cc;
+  background: #f4f6f8;
+}
+
+.prog-cumplida {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin: 10px 0 4px;
+}
+.prog-cumplida span {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.prog-cumplida small {
+  color: var(--muted, #5b6472);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.prog-cumplida strong {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+.prog-cumplida em {
+  font-size: 0.72rem;
+  font-style: italic;
+  color: var(--muted, #5b6472);
+}
+
+/* Barra: entrada ---- (ahora) ---- salida */
+.prog-linea {
+  margin: 10px 0 4px;
+}
+
+.prog-linea-barra {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  background: #dfe6ec;
+  overflow: visible;
+}
+
+.prog-linea-progreso {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #0a6b3b, #37a06a);
+}
+
+.prog-linea-ahora {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  border-radius: 50%;
+  background: #0a6b3b;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  transform: translateY(-50%);
+}
+.prog-linea-ahora.fuera {
+  background: #c2410c;
+}
+
+.prog-linea-extremos {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.8rem;
+}
+.prog-linea-extremos small {
+  display: block;
+  color: var(--muted, #5b6472);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.prog-linea-extremos .der { text-align: right; }
+.prog-ahora-txt {
+  color: var(--muted, #5b6472);
+  font-variant-numeric: tabular-nums;
+}
+
+.programacion-aviso {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #fff8e6;
+  border: 1px solid #f0dca8;
+  color: #6b5200;
+}
+.programacion-aviso i {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  margin-top: 1px;
+}
+
 /* ---- Administracion > Puntualidad ---- */
 .puntualidad-totales {
   display: flex;
@@ -884,6 +1055,100 @@ svg {
 .punt-tabla th {
   background: #f6f6f6;
   font-weight: 700;
+}
+
+/* Horas programadas: se muestran atenuadas junto a las reales para comparar. */
+.punt-tabla td.prog-hora {
+  color: #6b7280;
+  font-style: italic;
+}
+
+/* Verificador de horarios: celda con hora editable + la programada como referencia. */
+.verif-celda {
+  white-space: nowrap;
+}
+.verif-celda .verif-hora {
+  width: 68px;
+  padding: 4px 6px;
+  border: 1px solid var(--border, #cfd4dc);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  text-align: center;
+  letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums;
+}
+/* Contenedor campo de texto + botón de reloj + selector nativo (oculto). */
+.verif-hora-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.verif-hora-pick {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 6px;
+}
+.verif-hora-pick:hover { background: #eef1f5; }
+.verif-borrar {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 6px;
+  opacity: 0.65;
+}
+.verif-borrar:hover { background: #fdecec; opacity: 1; }
+
+/* Fila ya corregida y guardada: check verde para saber que "ya lo hice". */
+.verif-row.verif-guardado > td {
+  background: #f0fbf4;
+  border-bottom-color: #bfe6cd;
+}
+.verif-row.verif-guardado > td:first-child {
+  box-shadow: inset 3px 0 0 0 #0a6b3b;
+}
+.mini-btn.ok {
+  background: #0a6b3b;
+  color: #fff;
+  border-color: #0a6b3b;
+  font-weight: 700;
+}
+/* El selector nativo queda oculto pero presente para poder abrir su reloj. */
+.verif-hora-native {
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.verif-celda .verif-hora:disabled {
+  background: #f1f2f4;
+  color: #9aa0aa;
+}
+.verif-celda .prog-hora {
+  display: block;
+  margin-top: 2px;
+  color: #6b7280;
+  font-style: italic;
+  font-size: 0.72rem;
+}
+.verif-tabla td { vertical-align: top; }
+
+/* Tablas anchas (anticipos y excesos): que desplacen solas, sin estirar la pagina. */
+.tabla-scroll {
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .punt-warn {
@@ -1002,12 +1267,36 @@ svg {
   white-space: nowrap;
 }
 
+.jornadas-subtitulo {
+  margin: 14px 0 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.mini-btn {
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid var(--primary, #0a6b3b);
+  background: #fff;
+  color: var(--primary, #0a6b3b);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mini-btn:hover {
+  background: var(--primary, #0a6b3b);
+  color: #fff;
+}
+
 .jt-invertido { background: #fdecec; color: #b00020; }
 .jt-turno     { background: #fff3cd; color: #664d03; }
 .jt-ventana   { background: #e7e0fb; color: #4b2ea8; }
 .jt-larga     { background: #e0efff; color: #0b4a8a; }
 .jt-corta     { background: #ffe8d6; color: #9a4a06; }
 .jt-sincerrar { background: #eee; color: #444; }
+.jt-ok        { background: #dcf5e6; color: #0a6b3b; }
 
 /* ---- Agenda de celulares guardados por cedula ---- */
 .comprobante-agenda {

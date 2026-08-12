@@ -1,20 +1,8 @@
--- Deteccion de jornadas anomalas: conductores que trabajaron fuera de su horario
--- o con las marcas "trocadas". Se apoya en la programacion ya cruzada
--- (programacion_turnos) y en las marcas reales (asistencias).
---
--- Tipos que detecta, en orden de prioridad (cada jornada recibe UN tipo):
---   1. sentido_invertido : marco SALIDA donde iba ENTRADA (salida huerfana, sin una
---                          entrada abierta que cerrar). Es el caso "trocado".
---   2. sin_cerrar        : entro y nunca marco la salida.
---   3. muy_corta         : entrada y salida a menos de 30 min (marca doble / error).
---   4. jornada_larga     : entrada y salida a mas de 16 h (no cerro a tiempo).
---   5. turno_cambiado    : trabajo el horario del OTRO turno del vehiculo (swap con
---                          el otro conductor).
---   6. fuera_ventana     : entrada Y salida corridas +3 h respecto a lo programado,
---                          sin ser un cambio de turno limpio.
---
--- La jornada del turno 2 cruza la medianoche, por eso el emparejamiento de marcas
--- se hace por conductor ordenando por timestamp (no por dia calendario).
+-- Ampliacion de reporte_jornadas_anomalas: el detalle ahora devuelve la hora
+-- programada de INGRESO y de SALIDA por separado (entrada_programada /
+-- salida_programada), tomadas de programacion_turnos para ese conductor y dia,
+-- eligiendo el turno mas cercano a la marca. Asi el que corrige puede comparar
+-- la entrada real contra la programada y la salida real contra la programada.
 
 create or replace function public.reporte_jornadas_anomalas(
   p_desde date,
@@ -166,18 +154,33 @@ begin
       where fecha between p_desde - 1 and p_hasta
    );
 
+  -- Detalle. Se agrega, por cada evento, la hora PROGRAMADA de ingreso y de salida
+  -- tomadas del turno mas cercano a la marca ese dia (para poder corregir comparando).
   select jsonb_agg(jsonb_build_object(
-           'id', id, 'dni', dni, 'nombre', nombre, 'fecha', fecha, 'tipo', tipo,
-           'sentido', sentido, 'hora', to_char(hora, 'HH24:MI'),
-           'hora_salida', to_char(next_hora, 'HH24:MI'),
-           'turno', turno_programado,
-           'hora_programada', to_char(hora_programada, 'HH24:MI'),
-           'vehiculo', vehiculo_reporte,
-           'horas', horas,
-           'min_entrada', minutos_diferencia, 'min_salida', next_dif
-         ) order by fecha desc, hora desc)
+           'id', an.id, 'dni', an.dni, 'nombre', an.nombre, 'fecha', an.fecha,
+           'tipo', an.tipo,
+           'sentido', an.sentido, 'hora', to_char(an.hora, 'HH24:MI'),
+           'hora_salida', to_char(an.next_hora, 'HH24:MI'),
+           'turno', an.turno_programado,
+           'hora_programada', to_char(an.hora_programada, 'HH24:MI'),
+           'entrada_programada', to_char(prog.entrada_ts, 'HH24:MI'),
+           'salida_programada', to_char(prog.salida_ts, 'HH24:MI'),
+           'base', prog.base,
+           'vehiculo', an.vehiculo_reporte,
+           'horas', an.horas,
+           'min_entrada', an.minutos_diferencia, 'min_salida', an.next_dif
+         ) order by an.fecha desc, an.hora desc)
     into v_detalle
-    from _anom;
+    from _anom an
+    left join lateral (
+      select pt.entrada_ts, pt.salida_ts, pt.base
+        from public.programacion_turnos pt
+       where pt.dni = an.dni and pt.fecha = an.fecha
+         and pt.entrada_ts is not null
+         and (an.turno_programado is null or pt.turno = an.turno_programado)
+       order by abs(extract(epoch from (an.ts - pt.entrada_ts)))
+       limit 1
+    ) prog on true;
 
   select jsonb_agg(r order by (r->>'total')::int desc)
     into v_resumen

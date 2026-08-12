@@ -77,10 +77,25 @@ const state = {
   // Programacion de turnos del dia (tabla programacion_turnos vía RPC).
   programacionHoy: null,
   programacionAvisoVehiculo: "",
+  programacionAvisoHorario: "",
+  // Sentido que sugiere el HORARIO programado (manda sobre la ultima marca).
+  sentidoSegunProgramacion: null,
+  sentidoForzadoManual: false,
+  // Estado del turno programado que corresponde a este momento (RPC estado_turno_actual).
+  // Si viene `completa`, la jornada ya se cumplio y NO se admite otra marca.
+  turnoEstado: null,
   puntualidadLoaded: false,
   jornadasLoaded: false,
   jornadasData: null,
   jornadasFiltro: "",
+  verificadorLoaded: false,
+  verificadorData: null,
+  verificadorFiltro: "",
+  // "errores" (rango) | "dia" (consolidado del día) | "desfases" (anticipos/excesos)
+  verificadorModo: "errores",
+  verificadorDiaData: null,
+  verificadorDesfasesData: null,
+  verificadorGestoresData: null,
   horarioLoaded: false,
   horarioFilas: [],
   base3Loaded: false,
@@ -89,7 +104,8 @@ const state = {
   mapaMap: null,
   mapaLayer: null,
   // Fecha de corte de las verificaciones: no se evalua nada anterior.
-  fechaCorteVerificacion: "2026-07-15",
+  // Debe coincidir con fecha_corte_verificacion() en la base: no se revisa nada anterior.
+  fechaCorteVerificacion: "2026-08-01",
   compressedFile: null,
   faceValidated: false,
   faceWarning: "",
@@ -238,9 +254,25 @@ const elements = {
   jornadasFiltros: $("#jornadasFiltros"),
   jornadasTotales: $("#jornadasTotales"),
   jornadasResumen: $("#jornadasResumen"),
+  jornadasResumenBox: $("#jornadasResumenBox"),
   jornadasDetalleBox: $("#jornadasDetalleBox"),
   jornadasDetalle: $("#jornadasDetalle"),
   jornadasMessage: $("#jornadasMessage"),
+  jornadasExportButton: $("#jornadasExportButton"),
+  verificadorDesdeInput: $("#verificadorDesdeInput"),
+  verificadorHastaInput: $("#verificadorHastaInput"),
+  verificadorBuscarInput: $("#verificadorBuscarInput"),
+  verificadorBuscarButton: $("#verificadorBuscarButton"),
+  verificadorFiltrarButton: $("#verificadorFiltrarButton"),
+  verificadorDiaButton: $("#verificadorDiaButton"),
+  verificadorDesfasesButton: $("#verificadorDesfasesButton"),
+  verificadorGestoresButton: $("#verificadorGestoresButton"),
+  verificadorExportButton: $("#verificadorExportButton"),
+  verificadorStatus: $("#verificadorStatus"),
+  verificadorFiltros: $("#verificadorFiltros"),
+  verificadorTotales: $("#verificadorTotales"),
+  verificadorDetalle: $("#verificadorDetalle"),
+  verificadorMessage: $("#verificadorMessage"),
   horarioDesdeInput: $("#horarioDesdeInput"),
   horarioHastaInput: $("#horarioHastaInput"),
   horarioBuscarInput: $("#horarioBuscarInput"),
@@ -1349,12 +1381,14 @@ function renderJornadasAnomalas() {
   `;
 
   if (!resumen.length) {
-    elements.jornadasResumen.innerHTML =
-      `<p class="field-hint">Sin jornadas anómalas en este rango. 👌</p>`;
     elements.jornadasDetalleBox.classList.add("hidden");
+    elements.jornadasResumenBox?.classList.add("hidden");
+    setMessage(elements.jornadasMessage, "Sin jornadas anómalas en este rango. 👌", "success");
     return;
   }
+  setMessage(elements.jornadasMessage, "");
 
+  elements.jornadasResumenBox?.classList.remove("hidden");
   elements.jornadasResumen.innerHTML = `
     <table class="punt-tabla">
       <thead><tr>
@@ -1385,28 +1419,80 @@ function renderJornadasAnomalas() {
   elements.jornadasDetalle.innerHTML = `
     <table class="punt-tabla">
       <thead><tr>
-        <th>Fecha</th><th>Conductor</th><th>Tipo</th><th>Turno</th>
-        <th>Entrada</th><th>Salida</th><th>Programado</th><th>Detalle</th><th>Vehículo</th>
+        <th>Fecha</th><th>Conductor</th><th>Cédula</th><th>Base</th><th>Tipo</th><th>Turno</th>
+        <th>Entrada</th><th>Prog. ingreso</th><th>Salida</th><th>Prog. salida</th>
+        <th>Detalle</th><th>Vehículo</th><th>Acción</th>
       </tr></thead>
       <tbody>
         ${detalle.map((d) => {
           const meta = JORNADA_TIPOS[d.tipo] || { etiqueta: d.tipo, clase: "" };
+          // La hora de la marca va en la columna que corresponde a su sentido.
+          const entradaTxt = d.sentido === "entrada" ? (d.hora || "—") : "—";
+          const salidaTxt = d.sentido === "salida" ? (d.hora || "—") : (d.hora_salida || "—");
           return `
           <tr>
             <td>${escapeHtml(d.fecha || "")}</td>
             <td>${escapeHtml(d.nombre || "")}</td>
+            <td>${escapeHtml(d.dni || "")}</td>
+            <td>${escapeHtml(d.base || "—")}</td>
             <td><span class="jornada-pill ${meta.clase}">${meta.etiqueta}</span></td>
-            <td>${d.turno ?? ""}</td>
-            <td>${escapeHtml(d.hora || "")}</td>
-            <td>${escapeHtml(d.hora_salida || "")}</td>
-            <td>${escapeHtml(d.hora_programada || "")}</td>
+            <td>${d.turno ?? "—"}</td>
+            <td>${escapeHtml(entradaTxt)}</td>
+            <td class="prog-hora">${escapeHtml(d.entrada_programada || "—")}</td>
+            <td>${escapeHtml(salidaTxt)}</td>
+            <td class="prog-hora">${escapeHtml(d.salida_programada || "—")}</td>
             <td>${describirJornada(d)}</td>
             <td>${escapeHtml(d.vehiculo || "")}</td>
+            <td><button type="button" class="mini-btn jornada-corregir"
+                  data-dni="${escapeHtml(d.dni || "")}" data-fecha="${escapeHtml(d.fecha || "")}">
+                  Corregir</button></td>
           </tr>`;
         }).join("")}
       </tbody>
     </table>
   `;
+}
+
+// Salta a "Corregir horas" con la cedula y fecha del error precargadas.
+function corregirDesdeError(dni, fecha) {
+  showAdminSubtab("corregir");
+  if (elements.corregirDniInput) elements.corregirDniInput.value = dni || "";
+  if (elements.corregirDateInput) elements.corregirDateInput.value = fecha || "";
+  if (dni && fecha) buscarCorregir();
+  elements.corregirDniInput?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function exportarJornadasCsv() {
+  const data = state.jornadasData;
+  const detalle = data?.detalle || [];
+  if (!detalle.length) {
+    setMessage(elements.jornadasMessage, "Primero consulta un rango con errores para exportar.", "error");
+    return;
+  }
+  const header = ["Fecha", "Cedula", "Conductor", "Base", "Tipo", "Turno",
+    "Entrada", "Prog ingreso", "Salida", "Prog salida", "Detalle", "Vehiculo"];
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lineas = [header.join(";")];
+  detalle.forEach((d) => {
+    const meta = JORNADA_TIPOS[d.tipo] || { etiqueta: d.tipo };
+    // La entrada real va en su columna; para trocados/sin-cerrar puede faltar una de las dos.
+    const entradaReal = d.sentido === "entrada" ? (d.hora || "") : "";
+    const salidaReal = d.sentido === "salida" ? (d.hora || "") : (d.hora_salida || "");
+    lineas.push([d.fecha, d.dni, d.nombre, d.base || "", meta.etiqueta, d.turno ?? "",
+      entradaReal, d.entrada_programada || "", salidaReal, d.salida_programada || "",
+      describirJornada(d), d.vehiculo || ""]
+      .map(esc).join(";"));
+  });
+  const blob = new Blob(["﻿" + lineas.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `errores_jornadas_${data.desde}_${data.hasta}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // Frase corta que explica cada evento en lenguaje humano.
@@ -1429,6 +1515,839 @@ function describirJornada(d) {
     default:
       return "";
   }
+}
+
+/* ==========================================================================
+   Administracion > Verificador de horarios
+   Mismo reporte de jornadas anomalas, pero con la hora de ingreso y salida
+   EDITABLE en la misma tabla (guarda via actualizar_marca_asistencia).
+   ========================================================================== */
+
+function setupVerificadorDefaults() {
+  if (!elements.verificadorDesdeInput || elements.verificadorDesdeInput.value) return;
+  const hoy = getTodayParts().date;
+  const corte = state.fechaCorteVerificacion;
+  const desde = new Date(`${hoy}T00:00:00`);
+  desde.setDate(desde.getDate() - 6); // por defecto, la última semana
+  let desdeStr = desde.toISOString().slice(0, 10);
+  if (desdeStr < corte) desdeStr = corte;
+  elements.verificadorDesdeInput.value = desdeStr;
+  elements.verificadorHastaInput.value = hoy;
+  elements.verificadorDesdeInput.min = corte;
+  elements.verificadorHastaInput.min = corte;
+}
+
+async function cargarVerificador() {
+  const desde = elements.verificadorDesdeInput?.value;
+  const hasta = elements.verificadorHastaInput?.value;
+  if (!desde || !hasta) {
+    setMessage(elements.verificadorMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.verificadorMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+
+  setBusy(elements.verificadorBuscarButton, true);
+  setMessage(elements.verificadorMessage, "");
+  elements.verificadorStatus.textContent = "Verificando horarios...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("reporte_jornadas_anomalas", {
+      p_desde: desde, p_hasta: hasta
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo generar la verificación.");
+
+    state.verificadorLoaded = true;
+    state.verificadorModo = "errores";
+    state.verificadorData = data;
+    state.verificadorFiltro = "";
+    renderVerificador();
+  } catch (e) {
+    elements.verificadorStatus.textContent = "No se pudo verificar los horarios.";
+    setMessage(elements.verificadorMessage, e?.message || "Error consultando la verificación.", "error");
+  } finally {
+    setBusy(elements.verificadorBuscarButton, false);
+  }
+}
+
+// Vista consolidada del DIA: todos los conductores programados de la fecha "Hasta",
+// con su turno, la hora programada y la que marcaron (editable).
+async function cargarVerificadorDia() {
+  const fecha = elements.verificadorHastaInput?.value;
+  if (!fecha) {
+    setMessage(elements.verificadorMessage, "Selecciona la fecha en «Hasta».", "error");
+    return;
+  }
+
+  setBusy(elements.verificadorDiaButton, true);
+  setMessage(elements.verificadorMessage, "");
+  elements.verificadorStatus.textContent = "Cargando el día completo...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("verificacion_dia", { p_fecha: fecha });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo cargar el día.");
+
+    state.verificadorLoaded = true;
+    state.verificadorModo = "dia";
+    state.verificadorDiaData = data;
+    renderVerificadorDia();
+  } catch (e) {
+    elements.verificadorStatus.textContent = "No se pudo cargar el día completo.";
+    setMessage(elements.verificadorMessage, e?.message || "Error consultando el día.", "error");
+  } finally {
+    setBusy(elements.verificadorDiaButton, false);
+  }
+}
+
+// Estado de una fila del día: compara lo programado con lo realmente marcado.
+function estadoDia(x) {
+  const hasEnt = !!x.entrada_id;
+  const hasSal = !!x.salida_id;
+  if (!hasEnt && !hasSal) return { txt: "Sin marcar", cls: "jt-sincerrar" };
+  if (!hasEnt) return { txt: "Falta entrada", cls: "jt-invertido" };
+  if (!hasSal) return { txt: "Falta salida", cls: "jt-sincerrar" };
+  const ed = Math.abs(x.entrada_dif ?? 0);
+  const sd = Math.abs(x.salida_dif ?? 0);
+  if (ed > 60 || sd > 60) return { txt: "Diferencia", cls: "jt-ventana" };
+  return { txt: "A tiempo", cls: "jt-ok" };
+}
+
+// Etiqueta corta de diferencia en minutos ("+5m" / "-12m" / "").
+function difTxt(min) {
+  if (min == null) return "";
+  const n = Math.round(min);
+  return `${n > 0 ? "+" : ""}${n}m`;
+}
+
+function renderVerificadorDia() {
+  const data = state.verificadorDiaData;
+  if (!data) return;
+  let filas = data.filas || [];
+  const total = filas.length;
+
+  elements.verificadorStatus.textContent =
+    `Día ${data.fecha} · ${total} turno(s) programado(s)`;
+
+  // Totales según el estado.
+  const cuenta = { sinmarca: 0, falta: 0, dif: 0, ok: 0 };
+  filas.forEach((x) => {
+    const e = estadoDia(x);
+    if (e.txt === "Sin marcar") cuenta.sinmarca++;
+    else if (e.txt.startsWith("Falta")) cuenta.falta++;
+    else if (e.txt === "Diferencia") cuenta.dif++;
+    else cuenta.ok++;
+  });
+  elements.verificadorFiltros.innerHTML = "";
+  elements.verificadorTotales.innerHTML = `
+    <div class="punt-card"><span>${total}</span><small>programados</small></div>
+    <div class="punt-card"><span>${cuenta.ok}</span><small>a tiempo</small></div>
+    <div class="punt-card falta"><span>${cuenta.dif}</span><small>con diferencia</small></div>
+    <div class="punt-card falta"><span>${cuenta.falta + cuenta.sinmarca}</span><small>sin marca</small></div>
+  `;
+
+  // Filtro por texto (nombre / cédula / vehículo).
+  const q = (elements.verificadorBuscarInput?.value || "").trim().toLowerCase();
+  if (q) {
+    filas = filas.filter((x) =>
+      `${x.nombre || ""} ${x.dni || ""} ${x.vehiculo_prog || ""} ${x.entrada_veh || ""}`
+        .toLowerCase().includes(q));
+  }
+
+  if (!filas.length) {
+    elements.verificadorDetalle.innerHTML = "";
+    setMessage(elements.verificadorMessage,
+      total ? "Sin resultados con ese filtro." : "No hay programación para esa fecha.", "success");
+    return;
+  }
+  setMessage(elements.verificadorMessage, "");
+
+  const esc = (v) => escapeHtml(String(v ?? ""));
+  elements.verificadorDetalle.innerHTML = `
+    <table class="punt-tabla verif-tabla">
+      <thead><tr>
+        <th>Conductor</th><th>Cédula</th><th>Base</th><th>Turno</th><th>Veh. prog.</th>
+        <th>Ingreso</th><th>Salida</th><th>Veh. real</th><th>Estado</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${filas.map((x) => {
+          const est = estadoDia(x);
+          const entHora = x.entrada_real || "";
+          const salHora = x.salida_real || "";
+          const entDis = x.entrada_id ? "" : "disabled";
+          const salDis = x.salida_id ? "" : "disabled";
+          const vehReal = x.entrada_veh || x.salida_veh || "";
+          const vehDistinto = vehReal && x.vehiculo_prog
+            && !String(vehReal).replace(/[^\dA-Za-z]/g, "").toUpperCase()
+                 .includes(String(x.vehiculo_prog).replace(/[^\dA-Za-z]/g, "").toUpperCase());
+          return `
+          <tr class="verif-row"
+              data-entrada-id="${esc(x.entrada_id || "")}" data-entrada-fecha="${esc(x.entrada_fecha || "")}"
+              data-entrada-veh="${esc(x.entrada_veh || "")}" data-entrada-hora="${esc(entHora)}"
+              data-salida-id="${esc(x.salida_id || "")}" data-salida-fecha="${esc(x.salida_fecha || "")}"
+              data-salida-veh="${esc(x.salida_veh || "")}" data-salida-hora="${esc(salHora)}">
+            <td>${esc(x.nombre)}</td>
+            <td>${esc(x.dni)}</td>
+            <td>${esc(x.base || "—")}</td>
+            <td>${x.turno ?? "—"}</td>
+            <td>${esc(x.vehiculo_prog || "—")}</td>
+            <td class="verif-celda">
+              ${horaInputHtml("entrada", entHora, !!entDis)}
+              <small class="prog-hora">prog ${esc(x.entrada_prog || "—")}${x.entrada_id ? ` · ${difTxt(x.entrada_dif)}` : ""}</small>
+            </td>
+            <td class="verif-celda">
+              ${horaInputHtml("salida", salHora, !!salDis)}
+              <small class="prog-hora">prog ${esc(x.salida_prog || "—")}${x.salida_id ? ` · ${difTxt(x.salida_dif)}` : ""}</small>
+            </td>
+            <td>${esc(vehReal || "—")}${vehDistinto ? ` <span class="jornada-pill jt-turno">≠</span>` : ""}</td>
+            <td><span class="jornada-pill ${est.cls}">${est.txt}</span></td>
+            <td><button type="button" class="mini-btn verif-guardar">Guardar</button></td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+/* ---- Modo "Anticipos y excesos": quien entra antes y quien cierra despues ---- */
+
+async function cargarVerificadorDesfases() {
+  const desde = elements.verificadorDesdeInput?.value;
+  const hasta = elements.verificadorHastaInput?.value;
+  if (!desde || !hasta) {
+    setMessage(elements.verificadorMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.verificadorMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+
+  setBusy(elements.verificadorDesfasesButton, true);
+  setMessage(elements.verificadorMessage, "");
+  elements.verificadorStatus.textContent = "Calculando anticipos y excesos...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("reporte_desfases", {
+      p_desde: desde, p_hasta: hasta
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo generar el reporte.");
+
+    state.verificadorLoaded = true;
+    state.verificadorModo = "desfases";
+    state.verificadorDesfasesData = data;
+    renderVerificadorDesfases();
+  } catch (e) {
+    elements.verificadorStatus.textContent = "No se pudo calcular los desfases.";
+    setMessage(elements.verificadorMessage, e?.message || "Error consultando desfases.", "error");
+  } finally {
+    setBusy(elements.verificadorDesfasesButton, false);
+  }
+}
+
+// "-45" -> "45 min antes" / "120" -> "2 h después". Habla en horas cuando pasa de 90.
+function difLegible(min) {
+  if (min === null || min === undefined) return "—";
+  const n = Math.round(min);
+  if (n === 0) return "en punto";
+  const abs = Math.abs(n);
+  const txt = abs >= 90
+    ? `${(abs / 60).toFixed(1).replace(".0", "")} h`
+    : `${abs} min`;
+  return `${txt} ${n < 0 ? "antes" : "después"}`;
+}
+
+function renderVerificadorDesfases() {
+  const data = state.verificadorDesfasesData;
+  if (!data) return;
+  const t = data.totales || {};
+  let resumen = data.resumen || [];
+  let detalle = data.detalle || [];
+
+  elements.verificadorStatus.textContent =
+    `${data.desde} a ${data.hasta} · ${t.marcas ?? 0} marcas con turno programado, ${t.conductores ?? 0} conductores`;
+  elements.verificadorFiltros.innerHTML = "";
+
+  elements.verificadorTotales.innerHTML = `
+    <div class="punt-card"><span>${difLegible(t.prom_entrada).replace(" antes", "").replace(" después", "")}</span>
+      <small>entrada promedio ${(t.prom_entrada ?? 0) < 0 ? "antes" : "después"}</small></div>
+    <div class="punt-card"><span>${difLegible(t.prom_salida).replace(" antes", "").replace(" después", "")}</span>
+      <small>salida promedio ${(t.prom_salida ?? 0) < 0 ? "antes" : "después"}</small></div>
+    <div class="punt-card falta"><span>${t.ent_antes_60 ?? 0}</span>
+      <small>entradas +1 h antes</small></div>
+    <div class="punt-card falta"><span>${t.sal_despues_60 ?? 0}</span>
+      <small>salidas +1 h después</small></div>
+  `;
+
+  // Filtro por texto sobre nombre / cédula / base.
+  const q = (elements.verificadorBuscarInput?.value || "").trim().toLowerCase();
+  if (q) {
+    resumen = resumen.filter((x) => `${x.nombre || ""} ${x.dni || ""} ${x.base || ""}`.toLowerCase().includes(q));
+    detalle = detalle.filter((x) => `${x.nombre || ""} ${x.dni || ""} ${x.base || ""}`.toLowerCase().includes(q));
+  }
+
+  if (!resumen.length) {
+    elements.verificadorDetalle.innerHTML = "";
+    setMessage(elements.verificadorMessage,
+      (data.resumen || []).length ? "Sin resultados con ese filtro." : "Sin marcas con turno programado en el rango.", "success");
+    return;
+  }
+  setMessage(elements.verificadorMessage, "");
+
+  const esc = (v) => escapeHtml(String(v ?? ""));
+  const chip = (min, tipo) => {
+    // Anticipo al entrar y exceso al salir se resaltan segun el tamaño.
+    const abs = Math.abs(min || 0);
+    const cls = abs >= 120 ? "jt-invertido" : abs >= 60 ? "jt-corta" : "jt-ok";
+    return `<span class="jornada-pill ${cls}">${difLegible(min)}</span>`;
+  };
+
+  elements.verificadorDetalle.innerHTML = `
+    <h3 class="jornadas-subtitulo">Por conductor · ordenado por minutos de más</h3>
+    <div class="tabla-scroll">
+    <table class="punt-tabla">
+      <thead><tr>
+        <th>Conductor</th><th>Cédula</th><th>Base</th>
+        <th>Entradas</th><th>Entrada promedio</th><th>Máx. anticipo</th><th>Veces +1 h antes</th>
+        <th>Salidas</th><th>Salida promedio</th><th>Máx. exceso</th><th>Veces +1 h después</th>
+        <th>Total de más</th>
+      </tr></thead>
+      <tbody>
+        ${resumen.map((r) => `
+          <tr>
+            <td>${esc(r.nombre)}</td>
+            <td>${esc(r.dni)}</td>
+            <td>${esc(r.base || "—")}</td>
+            <td>${r.n_entradas ?? 0}</td>
+            <td>${r.n_entradas ? chip(r.prom_entrada) : "—"}</td>
+            <td>${r.max_antes_entrada ? `<strong>${difLegible(-r.max_antes_entrada)}</strong>` : "—"}</td>
+            <td>${r.veces_ent_antes_60 || ""}</td>
+            <td>${r.n_salidas ?? 0}</td>
+            <td>${r.n_salidas ? chip(r.prom_salida) : "—"}</td>
+            <td>${r.max_despues_salida ? `<strong>${difLegible(r.max_despues_salida)}</strong>` : "—"}</td>
+            <td>${r.veces_sal_despues_60 || ""}</td>
+            <td><strong>${Math.round((r.exceso_total || 0) / 60 * 10) / 10} h</strong></td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+    </div>
+
+    <details class="puntualidad-detalle">
+      <summary>Ver las ${detalle.length} marcas con mayor desfase</summary>
+      <div class="tabla-scroll">
+      <table class="punt-tabla">
+        <thead><tr>
+          <th>Fecha</th><th>Conductor</th><th>Cédula</th><th>Base</th><th>Turno</th>
+          <th>Tipo</th><th>Programada</th><th>Real</th><th>Desfase</th><th>Vehículo</th>
+        </tr></thead>
+        <tbody>
+          ${detalle.map((d) => `
+            <tr>
+              <td>${esc(d.fecha)}</td>
+              <td>${esc(d.nombre)}</td>
+              <td>${esc(d.dni)}</td>
+              <td>${esc(d.base || "—")}</td>
+              <td>${d.turno ?? "—"}</td>
+              <td>${d.sentido === "entrada" ? "Entrada" : "Salida"}</td>
+              <td class="prog-hora">${esc(d.hora_programada || "—")}</td>
+              <td><strong>${esc(d.hora || "—")}</strong></td>
+              <td>${chip(d.dif)}</td>
+              <td>${esc(d.vehiculo || "")}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+      </div>
+    </details>
+  `;
+}
+
+/* ---- Modo "Gestores y auxiliares": personal SIN programacion de turnos ---- */
+
+const GESTOR_TIPOS = {
+  sin_cerrar:    { etiqueta: "Sin cerrar", clase: "jt-sincerrar" },
+  jornada_larga: { etiqueta: "Duración imposible", clase: "jt-larga" },
+  muy_corta:     { etiqueta: "Marca doble", clase: "jt-corta" }
+};
+
+async function cargarVerificadorGestores() {
+  const desde = elements.verificadorDesdeInput?.value;
+  const hasta = elements.verificadorHastaInput?.value;
+  if (!desde || !hasta) {
+    setMessage(elements.verificadorMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.verificadorMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+
+  setBusy(elements.verificadorGestoresButton, true);
+  setMessage(elements.verificadorMessage, "");
+  elements.verificadorStatus.textContent = "Validando gestores y auxiliares...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("validacion_sin_programacion", {
+      p_desde: desde, p_hasta: hasta
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo generar la validación.");
+
+    state.verificadorLoaded = true;
+    state.verificadorModo = "gestores";
+    state.verificadorGestoresData = data;
+    renderVerificadorGestores();
+  } catch (e) {
+    elements.verificadorStatus.textContent = "No se pudo validar el personal sin programación.";
+    setMessage(elements.verificadorMessage, e?.message || "Error consultando la validación.", "error");
+  } finally {
+    setBusy(elements.verificadorGestoresButton, false);
+  }
+}
+
+function renderVerificadorGestores() {
+  const data = state.verificadorGestoresData;
+  if (!data) return;
+  const t = data.totales || {};
+  let detalle = data.detalle || [];
+  let resumen = (data.resumen || []).filter((r) => r.novedades > 0);
+
+  elements.verificadorStatus.textContent =
+    `${data.desde} a ${data.hasta} · ${t.personas ?? 0} personas sin programación, `
+    + `${t.jornadas ?? 0} jornadas (mediana ${t.duracion_mediana ?? "—"} h)`;
+  elements.verificadorFiltros.innerHTML = "";
+
+  elements.verificadorTotales.innerHTML = `
+    <div class="punt-card"><span>${t.jornadas ?? 0}</span><small>jornadas</small></div>
+    <div class="punt-card falta"><span>${t.con_novedad ?? 0}</span><small>con novedad</small></div>
+    <div class="punt-card falta"><span>${t.sin_cerrar ?? 0}</span><small>sin cerrar</small></div>
+    <div class="punt-card falta"><span>${t.jornada_larga ?? 0}</span><small>duración imposible</small></div>
+  `;
+
+  const q = (elements.verificadorBuscarInput?.value || "").trim().toLowerCase();
+  if (q) {
+    const coincide = (x) => `${x.nombre || ""} ${x.dni || ""} ${x.cargo || ""}`.toLowerCase().includes(q);
+    detalle = detalle.filter(coincide);
+    resumen = resumen.filter(coincide);
+  }
+
+  if (!detalle.length) {
+    elements.verificadorDetalle.innerHTML = "";
+    setMessage(elements.verificadorMessage,
+      (data.detalle || []).length ? "Sin resultados con ese filtro."
+        : `Sin novedades en las jornadas del personal sin programación. 👌`, "success");
+    return;
+  }
+  setMessage(elements.verificadorMessage, "");
+
+  const esc = (v) => escapeHtml(String(v ?? ""));
+  elements.verificadorDetalle.innerHTML = `
+    <p class="field-hint">Se valida la <strong>jornada</strong>, no el horario: este personal rota
+    turno (hay quien entra desde las 00:04 hasta las 23:49), así que no hay hora programada contra
+    la cual compararlo. Una jornada normal dura entre 8 y 16 h; se marca lo que pasa de
+    <strong>${data.horas_max ?? 18} h</strong>.</p>
+    <div class="tabla-scroll">
+    <table class="punt-tabla verif-tabla">
+      <thead><tr>
+        <th>Fecha</th><th>Persona</th><th>Cédula</th><th>Cargo</th><th>Novedad</th>
+        <th>Entrada</th><th>Salida</th><th>Duración</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${detalle.map((d) => {
+          const meta = GESTOR_TIPOS[d.tipo] || { etiqueta: d.tipo, clase: "" };
+          return `
+          <tr class="verif-row"
+              data-entrada-id="${esc(d.entrada_id || "")}" data-entrada-fecha="${esc(d.entrada_fecha || "")}"
+              data-entrada-veh="" data-entrada-hora="${esc(d.entrada_hora || "")}"
+              data-salida-id="${esc(d.salida_id || "")}" data-salida-fecha="${esc(d.salida_fecha || "")}"
+              data-salida-veh="" data-salida-hora="${esc(d.salida_hora || "")}">
+            <td>${esc(d.fecha)}</td>
+            <td>${esc(d.nombre)}</td>
+            <td>${esc(d.dni)}</td>
+            <td>${esc(d.cargo || "—")}</td>
+            <td><span class="jornada-pill ${meta.clase}">${meta.etiqueta}</span></td>
+            <td class="verif-celda">${horaInputHtml("entrada", d.entrada_hora, !d.entrada_id)}</td>
+            <td class="verif-celda">${horaInputHtml("salida", d.salida_hora, !d.salida_id)}</td>
+            <td>${d.horas != null ? `<strong>${d.horas} h</strong>` : "<em>abierta</em>"}</td>
+            <td><button type="button" class="mini-btn verif-guardar">Guardar</button></td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+    </div>
+
+    ${resumen.length ? `
+    <details class="puntualidad-detalle">
+      <summary>Ver resumen por persona (${resumen.length} con novedades)</summary>
+      <div class="tabla-scroll">
+      <table class="punt-tabla">
+        <thead><tr>
+          <th>Persona</th><th>Cédula</th><th>Cargo</th><th>Jornadas</th><th>Novedades</th>
+          <th>Sin cerrar</th><th>Duración imposible</th><th>Marca doble</th>
+          <th>Duración promedio</th><th>Máxima</th>
+        </tr></thead>
+        <tbody>
+          ${resumen.map((r) => `
+            <tr>
+              <td>${esc(r.nombre)}</td>
+              <td>${esc(r.dni)}</td>
+              <td>${esc(r.cargo || "—")}</td>
+              <td>${r.jornadas ?? 0}</td>
+              <td><strong>${r.novedades ?? 0}</strong></td>
+              <td>${r.sin_cerrar || ""}</td>
+              <td>${r.jornada_larga || ""}</td>
+              <td>${r.muy_corta || ""}</td>
+              <td>${r.duracion_promedio != null ? r.duracion_promedio + " h" : "—"}</td>
+              <td>${r.duracion_max != null ? r.duracion_max + " h" : "—"}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+      </div>
+    </details>` : ""}
+  `;
+}
+
+// Re-render según el modo activo (lo usa el filtro de texto).
+function rerenderVerificador() {
+  if (state.verificadorModo === "dia") renderVerificadorDia();
+  else if (state.verificadorModo === "desfases") renderVerificadorDesfases();
+  else if (state.verificadorModo === "gestores") renderVerificadorGestores();
+  else renderVerificador();
+}
+
+function renderVerificador() {
+  const data = state.verificadorData;
+  if (!data) return;
+  const t = data.totales || {};
+  let detalle = data.detalle || [];
+
+  elements.verificadorStatus.textContent =
+    `${data.desde} a ${data.hasta} · solo se verifica desde ${state.fechaCorteVerificacion}`;
+
+  // Chips de filtro por tipo.
+  const chips = [["", "Todas", t.eventos || 0]];
+  for (const [key, meta] of Object.entries(JORNADA_TIPOS)) {
+    if (t[key]) chips.push([key, meta.etiqueta, t[key]]);
+  }
+  elements.verificadorFiltros.innerHTML = chips.map(([key, label, n]) =>
+    `<button type="button" class="jornada-chip ${state.verificadorFiltro === key ? "activo" : ""}"
+       data-verif-filtro="${key}">${label} <span>${n}</span></button>`).join("");
+
+  elements.verificadorTotales.innerHTML = `
+    <div class="punt-card"><span>${t.conductores ?? 0}</span><small>conductores</small></div>
+    <div class="punt-card falta"><span>${t.eventos ?? 0}</span><small>errores</small></div>
+    <div class="punt-card"><span>${t.sentido_invertido ?? 0}</span><small>trocados</small></div>
+    <div class="punt-card"><span>${t.fuera_ventana ?? 0}</span><small>fuera ventana</small></div>
+  `;
+
+  // Filtro por tipo (chip) y por texto (nombre / cédula / vehículo).
+  if (state.verificadorFiltro) detalle = detalle.filter((d) => d.tipo === state.verificadorFiltro);
+  const q = (elements.verificadorBuscarInput?.value || "").trim().toLowerCase();
+  if (q) {
+    detalle = detalle.filter((d) =>
+      `${d.nombre || ""} ${d.dni || ""} ${d.vehiculo || ""}`.toLowerCase().includes(q));
+  }
+
+  if (!detalle.length) {
+    elements.verificadorDetalle.innerHTML = "";
+    setMessage(elements.verificadorMessage,
+      (data.totales?.eventos ? "Sin resultados con ese filtro." : "Sin errores de horario en este rango. 👌"),
+      "success");
+    return;
+  }
+  setMessage(elements.verificadorMessage, "");
+
+  const esc = (v) => escapeHtml(String(v ?? ""));
+  elements.verificadorDetalle.innerHTML = `
+    <table class="punt-tabla verif-tabla">
+      <thead><tr>
+        <th>Fecha</th><th>Conductor</th><th>Cédula</th><th>Base</th><th>Vehículo</th>
+        <th>Tipo</th><th>Turno</th><th>Ingreso</th><th>Salida</th><th>Detalle</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${detalle.map((d) => {
+          const meta = JORNADA_TIPOS[d.tipo] || { etiqueta: d.tipo, clase: "" };
+          const entHora = d.entrada_hora || "";
+          const salHora = d.salida_hora || "";
+          const entDis = d.entrada_id ? "" : "disabled";
+          const salDis = d.salida_id ? "" : "disabled";
+          return `
+          <tr class="verif-row"
+              data-entrada-id="${esc(d.entrada_id || "")}" data-entrada-fecha="${esc(d.entrada_fecha || "")}"
+              data-entrada-veh="${esc(d.entrada_vehiculo || "")}" data-entrada-hora="${esc(entHora)}"
+              data-salida-id="${esc(d.salida_id || "")}" data-salida-fecha="${esc(d.salida_fecha || "")}"
+              data-salida-veh="${esc(d.salida_vehiculo || "")}" data-salida-hora="${esc(salHora)}">
+            <td>${esc(d.fecha)}</td>
+            <td>${esc(d.nombre)}</td>
+            <td>${esc(d.dni)}</td>
+            <td>${esc(d.base || "—")}</td>
+            <td>${esc(d.vehiculo || "")}</td>
+            <td><span class="jornada-pill ${meta.clase}">${meta.etiqueta}</span></td>
+            <td>${d.turno ?? "—"}</td>
+            <td class="verif-celda">
+              ${horaInputHtml("entrada", entHora, !!entDis)}
+              <small class="prog-hora">prog ${esc(d.entrada_programada || "—")}</small>
+            </td>
+            <td class="verif-celda">
+              ${horaInputHtml("salida", salHora, !!salDis)}
+              <small class="prog-hora">prog ${esc(d.salida_programada || "—")}</small>
+            </td>
+            <td>${describirJornada(d)}</td>
+            <td><button type="button" class="mini-btn verif-guardar">Guardar</button></td>
+          </tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+// Normaliza una hora escrita a mano al formato 24 h "HH:MM". Acepta "2338", "23:38",
+// "6:02", "0602". Devuelve null si es una hora invalida y "" si esta vacia.
+function normalizeHoraInput(valor) {
+  let s = String(valor || "").trim();
+  if (!s) return "";
+  s = s.replace(/[^\d:]/g, "");
+  let h, m;
+  if (s.includes(":")) {
+    [h, m] = s.split(":");
+  } else if (s.length <= 2) {
+    h = s; m = "0";
+  } else {
+    m = s.slice(-2); h = s.slice(0, -2);
+  }
+  h = parseInt(h, 10);
+  m = parseInt(m, 10);
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+    return null;
+  }
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+// Campo de hora editable (24 h) con un botón de reloj que abre el selector nativo y
+// un botón para eliminar esa marca. Lo elegido en el reloj se copia al campo (24 h).
+function horaInputHtml(sentido, hora, disabled) {
+  const extraClass = sentido === "entrada" ? "verif-ent-hora" : "verif-sal-hora";
+  const val = escapeHtml(String(hora || ""));
+  if (disabled) {
+    return `<input type="text" class="verif-hora ${extraClass}" value="${val}" placeholder="--:--" disabled>`;
+  }
+  return `<span class="verif-hora-wrap">`
+    + `<input type="text" inputmode="numeric" maxlength="5" placeholder="HH:MM"`
+    + ` class="verif-hora ${extraClass}" value="${val}">`
+    + `<button type="button" class="verif-hora-pick" tabindex="-1" aria-label="Elegir hora en el reloj">🕐</button>`
+    + `<button type="button" class="verif-borrar" data-sentido="${sentido}" tabindex="-1" aria-label="Eliminar esta marca">🗑</button>`
+    + `<input type="time" step="60" class="verif-hora-native" value="${val}" tabindex="-1" aria-hidden="true">`
+    + `</span>`;
+}
+
+// Guarda las horas editadas de una fila (entrada y/o salida) reusando el RPC de
+// correccion. Solo envia las que cambiaron; reenvia fecha y vehiculo sin tocar.
+async function guardarHorasVerificador(rowEl) {
+  if (!rowEl) return;
+  const cambios = [];
+  const entInput = rowEl.querySelector(".verif-ent-hora");
+  const salInput = rowEl.querySelector(".verif-sal-hora");
+
+  if (rowEl.dataset.entradaId && entInput && !entInput.disabled) {
+    const val = normalizeHoraInput(entInput.value);
+    if (val === null) {
+      setMessage(elements.verificadorMessage, "La hora de ingreso no es válida (usa HH:MM en 24 h).", "error");
+      entInput.focus();
+      return;
+    }
+    if (val && val !== rowEl.dataset.entradaHora) {
+      entInput.value = val;
+      cambios.push({ id: rowEl.dataset.entradaId, fecha: rowEl.dataset.entradaFecha,
+        hora: val, sentido: "entrada", vehiculo: rowEl.dataset.entradaVeh || null });
+    }
+  }
+  if (rowEl.dataset.salidaId && salInput && !salInput.disabled) {
+    const val = normalizeHoraInput(salInput.value);
+    if (val === null) {
+      setMessage(elements.verificadorMessage, "La hora de salida no es válida (usa HH:MM en 24 h).", "error");
+      salInput.focus();
+      return;
+    }
+    if (val && val !== rowEl.dataset.salidaHora) {
+      salInput.value = val;
+      cambios.push({ id: rowEl.dataset.salidaId, fecha: rowEl.dataset.salidaFecha,
+        hora: val, sentido: "salida", vehiculo: rowEl.dataset.salidaVeh || null });
+    }
+  }
+
+  if (!cambios.length) {
+    setMessage(elements.verificadorMessage, "No cambiaste ninguna hora en esa fila.", "");
+    return;
+  }
+
+  const ok = await confirmGraphical(
+    "Guardar horas corregidas",
+    `¿Guardar ${cambios.length === 2 ? "la entrada y la salida" : "la hora"} de esta jornada? `
+    + "Solo se cambia en la base local (no en Buk).",
+    "Sí, guardar", "Cancelar"
+  );
+  if (!ok) return;
+
+  const btn = rowEl.querySelector(".verif-guardar");
+  setBusy(btn, true);
+  try {
+    for (const c of cambios) {
+      const horaFull = c.hora.length === 5 ? `${c.hora}:00` : c.hora;
+      const { data, error } = await supabaseClient.rpc("actualizar_marca_asistencia", {
+        p_id: c.id, p_fecha: c.fecha, p_hora: horaFull, p_sentido: c.sentido,
+        p_vehiculo: c.vehiculo || null
+      });
+      if (error || !data?.ok) throw new Error(error?.message || data?.error || "error");
+      // Actualiza el "original" para no re-guardar lo mismo.
+      if (c.sentido === "entrada") rowEl.dataset.entradaHora = c.hora;
+      else rowEl.dataset.salidaHora = c.hora;
+    }
+    // Marca visual: esta fila ya quedó corregida ("✓ Guardado").
+    rowEl.classList.add("verif-guardado");
+    if (btn) { btn.classList.add("ok"); btn.textContent = "✓ Guardado"; }
+    setMessage(elements.verificadorMessage,
+      `✅ ${cambios.length} hora(s) actualizada(s). Vuelve a verificar para recalcular.`, "success");
+  } catch (e) {
+    setMessage(elements.verificadorMessage, `No se pudo guardar: ${e.message || e}`, "error");
+  } finally {
+    setBusy(btn, false);
+  }
+}
+
+// Elimina una marca (entrada o salida) de una fila del verificador. Util para las
+// salidas huerfanas / duplicadas que no tienen una entrada que editar.
+async function borrarMarcaVerificador(rowEl, sentido) {
+  if (!rowEl || !sentido) return;
+  const id = sentido === "entrada" ? rowEl.dataset.entradaId : rowEl.dataset.salidaId;
+  if (!id) {
+    setMessage(elements.verificadorMessage, "Esa jornada no tiene una marca de ese tipo para eliminar.", "");
+    return;
+  }
+  const hora = sentido === "entrada" ? rowEl.dataset.entradaHora : rowEl.dataset.salidaHora;
+  const fecha = sentido === "entrada" ? rowEl.dataset.entradaFecha : rowEl.dataset.salidaFecha;
+
+  const ok = await confirmGraphical(
+    "Eliminar marca",
+    `¿Eliminar la marca de ${sentido.toUpperCase()} del ${fecha || ""} a las ${hora || "--:--"}? `
+    + "Esta acción no se puede deshacer y NO la quita de Buk.",
+    "Sí, eliminar", "Cancelar"
+  );
+  if (!ok) return;
+
+  try {
+    const { data, error } = await supabaseClient.rpc("eliminar_asistencia", { p_id: id });
+    if (error || !data?.ok) throw new Error(error?.message || data?.error || "error");
+    setMessage(elements.verificadorMessage, "🗑 Marca eliminada. Actualizando...", "success");
+    // Recarga para recalcular el estado tras el borrado.
+    if (state.verificadorModo === "dia") await cargarVerificadorDia();
+    else if (state.verificadorModo === "desfases") await cargarVerificadorDesfases();
+    else if (state.verificadorModo === "gestores") await cargarVerificadorGestores();
+    else await cargarVerificador();
+  } catch (e) {
+    setMessage(elements.verificadorMessage, `No se pudo eliminar: ${e.message || e}`, "error");
+  }
+}
+
+function exportarVerificadorCsv() {
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  let header, lineas, nombreArchivo;
+
+  if (state.verificadorModo === "gestores") {
+    const data = state.verificadorGestoresData;
+    const filas = data?.detalle || [];
+    if (!filas.length) {
+      setMessage(elements.verificadorMessage, "Primero consulta un rango con novedades para exportar.", "error");
+      return;
+    }
+    header = ["Fecha", "Cedula", "Persona", "Cargo", "Novedad", "Entrada", "Salida", "Duracion (h)"];
+    lineas = [header.join(";")];
+    filas.forEach((d) => {
+      const meta = GESTOR_TIPOS[d.tipo] || { etiqueta: d.tipo };
+      lineas.push([d.fecha, d.dni, d.nombre, d.cargo || "", meta.etiqueta,
+        d.entrada_hora || "", d.salida_hora || "", d.horas ?? ""]
+        .map(esc).join(";"));
+    });
+    nombreArchivo = `gestores_auxiliares_${data.desde}_${data.hasta}.csv`;
+  } else if (state.verificadorModo === "desfases") {
+    const data = state.verificadorDesfasesData;
+    const filas = data?.resumen || [];
+    if (!filas.length) {
+      setMessage(elements.verificadorMessage, "Primero consulta un rango para exportar.", "error");
+      return;
+    }
+    header = ["Cedula", "Conductor", "Base", "Entradas", "Entrada promedio (min)",
+      "Max anticipo entrada (min)", "Veces +1h antes", "Salidas", "Salida promedio (min)",
+      "Max exceso salida (min)", "Veces +1h despues", "Total de mas (min)"];
+    lineas = [header.join(";")];
+    filas.forEach((r) => {
+      lineas.push([r.dni, r.nombre, r.base || "", r.n_entradas ?? 0, r.prom_entrada ?? "",
+        r.max_antes_entrada ?? "", r.veces_ent_antes_60 ?? 0, r.n_salidas ?? 0, r.prom_salida ?? "",
+        r.max_despues_salida ?? "", r.veces_sal_despues_60 ?? 0, r.exceso_total ?? 0]
+        .map(esc).join(";"));
+    });
+    // Segundo bloque en el mismo archivo: el detalle marca por marca.
+    lineas.push("");
+    lineas.push(["Fecha", "Cedula", "Conductor", "Base", "Turno", "Tipo",
+      "Hora programada", "Hora real", "Desfase (min)", "Vehiculo"].join(";"));
+    (data.detalle || []).forEach((d) => {
+      lineas.push([d.fecha, d.dni, d.nombre, d.base || "", d.turno ?? "",
+        d.sentido === "entrada" ? "Entrada" : "Salida",
+        d.hora_programada || "", d.hora || "", d.dif ?? "", d.vehiculo || ""]
+        .map(esc).join(";"));
+    });
+    nombreArchivo = `anticipos_excesos_${data.desde}_${data.hasta}.csv`;
+  } else if (state.verificadorModo === "dia") {
+    const data = state.verificadorDiaData;
+    const filas = data?.filas || [];
+    if (!filas.length) {
+      setMessage(elements.verificadorMessage, "Primero carga un día con programación para exportar.", "error");
+      return;
+    }
+    header = ["Fecha", "Cedula", "Conductor", "Base", "Turno", "Veh programado",
+      "Entrada prog", "Entrada real", "Dif entrada (min)",
+      "Salida prog", "Salida real", "Dif salida (min)", "Veh real", "Estado"];
+    lineas = [header.join(";")];
+    filas.forEach((x) => {
+      lineas.push([data.fecha, x.dni, x.nombre, x.base || "", x.turno ?? "", x.vehiculo_prog || "",
+        x.entrada_prog || "", x.entrada_real || "", x.entrada_dif ?? "",
+        x.salida_prog || "", x.salida_real || "", x.salida_dif ?? "",
+        x.entrada_veh || x.salida_veh || "", estadoDia(x).txt]
+        .map(esc).join(";"));
+    });
+    nombreArchivo = `dia_completo_${data.fecha}.csv`;
+  } else {
+    const data = state.verificadorData;
+    const detalle = data?.detalle || [];
+    if (!detalle.length) {
+      setMessage(elements.verificadorMessage, "Primero verifica un rango con errores para exportar.", "error");
+      return;
+    }
+    header = ["Fecha", "Cedula", "Conductor", "Base", "Tipo", "Turno",
+      "Entrada", "Prog ingreso", "Salida", "Prog salida", "Detalle", "Vehiculo"];
+    lineas = [header.join(";")];
+    detalle.forEach((d) => {
+      const meta = JORNADA_TIPOS[d.tipo] || { etiqueta: d.tipo };
+      lineas.push([d.fecha, d.dni, d.nombre, d.base || "", meta.etiqueta, d.turno ?? "",
+        d.entrada_hora || "", d.entrada_programada || "", d.salida_hora || "", d.salida_programada || "",
+        describirJornada(d), d.vehiculo || ""]
+        .map(esc).join(";"));
+    });
+    nombreArchivo = `verificador_horarios_${data.desde}_${data.hasta}.csv`;
+  }
+
+  const blob = new Blob(["﻿" + lineas.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombreArchivo;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /* ==========================================================================
@@ -1747,7 +2666,7 @@ function exportarBase3Csv() {
 }
 
 function showAdminSubtab(name) {
-  const valid = ["alerts", "abiertos", "marcas", "jornadas", "rechazos", "inconsistencias", "validacion", "sinmarca", "corregir", "puntualidad", "jornadas-anomalas", "horario", "mapa", "colaboradores", "rostros", "sonar"];
+  const valid = ["alerts", "abiertos", "marcas", "jornadas", "rechazos", "inconsistencias", "validacion", "sinmarca", "corregir", "puntualidad", "jornadas-anomalas", "verificador", "horario", "mapa", "colaboradores", "rostros", "sonar"];
   const target = valid.includes(name) ? name : "alerts";
   document.querySelectorAll("[data-admin-tab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.adminTab === target);
@@ -1786,6 +2705,11 @@ function showAdminSubtab(name) {
   if (target === "jornadas-anomalas") {
     setupJornadasDefaults();
     if (!state.jornadasLoaded) cargarJornadasAnomalas();
+  }
+
+  if (target === "verificador") {
+    setupVerificadorDefaults();
+    if (!state.verificadorLoaded) cargarVerificador();
   }
 
   if (target === "horario") {
@@ -1838,7 +2762,7 @@ const TUTORIAL_STEPS = [
   {
     icon: "log-in",
     titulo: "Revisa el tipo de marca",
-    texto: "Entrada o Salida se define automáticamente según la última marca. No es editable, así se evitan errores."
+    texto: "Entrada o Salida se define solo, según el turno programado del conductor. Si de verdad no corresponde, puedes corregirlo confirmando el cambio."
   },
   {
     icon: "message-circle",
@@ -2242,7 +3166,32 @@ const PUNTUALIDAD_TOLERANCIA_MIN = 15;
 function limpiarProgramacion() {
   state.programacionHoy = null;
   state.programacionAvisoVehiculo = "";
+  state.programacionAvisoHorario = "";
+  state.turnoEstado = null;
   elements.programacionBanner?.classList.add("hidden");
+}
+
+// True si la jornada del turno que corresponde a este momento YA se cumplio
+// (tiene entrada y salida): no se debe permitir otra marca.
+function jornadaYaCumplida() {
+  return !!(state.turnoEstado?.existe && state.turnoEstado?.completa);
+}
+
+// Consulta si el turno de este momento ya esta cumplido. Se llama despues de
+// cargar la programacion, porque de ahi sale el aviso y el bloqueo.
+async function cargarEstadoTurno(dni) {
+  state.turnoEstado = null;
+  if (!dni) return;
+  try {
+    const { data, error } = await supabaseClient.rpc("estado_turno_actual", {
+      p_dni: dni, p_momento: null
+    });
+    if (error) throw error;
+    if (data?.ok) state.turnoEstado = data;
+  } catch (e) {
+    console.warn("No se pudo consultar el estado del turno:", e?.message || e);
+  }
+  renderProgramacionBanner();
 }
 
 // Devuelve el turno del dia que corresponde al sentido que se va a marcar.
@@ -2280,56 +3229,227 @@ function minutosDesdeProgramado(horaProgramada) {
   return dif;
 }
 
+// Cargos que por definicion NO llevan programacion de turnos. Se comparan por
+// palabras clave porque en la base vienen con variantes de escritura
+// ("GESTOR DE SERVICIO", "GESTOR DE SERVICIOS Y EMBARQUEOPERATIVO", etc.).
+const CARGOS_SIN_PROGRAMACION = [
+  { re: /gestor.*(servicio|embarque)/, etiqueta: "Gestor de servicios y embarque" },
+  { re: /gestor.*movilidad/,           etiqueta: "Gestor de movilidad" },
+  { re: /auxiliar.*(control|flota)/,   etiqueta: "Auxiliar de gestión y control de flota" },
+  { re: /lider.*(control|servicio)/,   etiqueta: "Líder operativo" },
+  { re: /auxiliar.*(administrativ|comunicacion)/, etiqueta: "Auxiliar administrativa" }
+];
+
+// Devuelve la etiqueta del cargo si es uno de los que no maneja programacion.
+function cargoSinProgramacion(cargo) {
+  const c = String(cargo || "").toLowerCase();
+  if (!c) return null;
+  return CARGOS_SIN_PROGRAMACION.find((x) => x.re.test(c))?.etiqueta || null;
+}
+
+function hhmmAMin(hhmm) {
+  if (!hhmm) return null;
+  const h = Number(String(hhmm).slice(0, 2));
+  const m = Number(String(hhmm).slice(3, 5));
+  return Number.isInteger(h) && Number.isInteger(m) ? h * 60 + m : null;
+}
+
+// Barra visual del turno: entrada --- (ahora) --- salida.
+function lineaDeTiempoTurno(turno) {
+  const ent = hhmmAMin(turno.hora_entrada);
+  let sal = hhmmAMin(turno.hora_salida);
+  const partes = getReportParts();
+  let ahora = hhmmAMin(partes.time);
+  if (ent === null || sal === null || ahora === null) return "";
+
+  // El turno 2 cruza la medianoche: se estira la escala en vez de dar vuelta atras.
+  if (sal <= ent) sal += 1440;
+  if (ahora < ent - 180) ahora += 1440;
+
+  const span = sal - ent;
+  const pct = span > 0 ? Math.max(0, Math.min(100, ((ahora - ent) / span) * 100)) : 0;
+  const dentro = ahora >= ent && ahora <= sal;
+
+  return `
+    <div class="prog-linea">
+      <div class="prog-linea-barra">
+        <div class="prog-linea-progreso" style="width:${pct.toFixed(1)}%"></div>
+        <div class="prog-linea-ahora ${dentro ? "" : "fuera"}" style="left:${pct.toFixed(1)}%"
+             title="Hora actual"></div>
+      </div>
+      <div class="prog-linea-extremos">
+        <span><small>Entrada</small><strong>${escapeHtml(turno.hora_entrada || "--:--")}</strong></span>
+        <span class="prog-ahora-txt">ahora ${escapeHtml(partes.time.slice(0, 5))}</span>
+        <span class="der"><small>Salida</small><strong>${escapeHtml(turno.hora_salida || "--:--")}</strong></span>
+      </div>
+    </div>`;
+}
+
+// Anuncio grande y automatico de lo que se va a registrar. Es lo primero que debe
+// ver quien marca, ANTES de tomar la foto: si dice ENTRADA y venia a salir, ahi se
+// atrapa el error, que es justo lo que producia los sentidos invertidos.
+function anuncioSentidoHtml(sentido, turno) {
+  const esEntrada = sentido !== "salida";
+  const horaProg = turno ? (esEntrada ? turno.hora_entrada : turno.hora_salida) : null;
+  const detalle = turno
+    ? `Turno ${turno.turno} · ${esEntrada ? "entrada" : "salida"} programada
+       <strong>${escapeHtml(horaProg || "--:--")}</strong>`
+    : "Según su última marca registrada";
+  return `
+    <div class="prog-anuncio ${esEntrada ? "es-entrada" : "es-salida"}">
+      <i data-lucide="${esEntrada ? "log-in" : "log-out"}"></i>
+      <div>
+        <strong>Va a registrar ${esEntrada ? "ENTRADA" : "SALIDA"}</strong>
+        <small>${detalle}</small>
+      </div>
+    </div>`;
+}
+
 function renderProgramacionBanner() {
   const banner = elements.programacionBanner;
   if (!banner) return;
 
-  const turno = turnoProgramadoActual();
-  if (!turno) {
+  // Sin colaborador validado no hay nada que mostrar.
+  if (!state.csvCandidate && !state.colaborador) {
     banner.classList.add("hidden");
     banner.innerHTML = "";
     return;
   }
 
+  // ---- Jornada del turno YA cumplida: se bloquea otra marca ----
+  if (jornadaYaCumplida()) {
+    const t = state.turnoEstado;
+    banner.className = "programacion-banner bloqueado";
+    banner.innerHTML = `
+      <div class="programacion-titulo">
+        <i data-lucide="shield-check"></i>
+        Jornada de hoy ya cumplida
+        <span class="prog-chip bloqueo">No admite más marcas</span>
+      </div>
+      <div class="prog-cumplida">
+        <span><small>Entrada</small><strong>${escapeHtml(t.entrada_real || "--:--")}</strong>
+          <em>prog ${escapeHtml(t.entrada_prog || "--:--")}</em></span>
+        <span><small>Salida</small><strong>${escapeHtml(t.salida_real || "--:--")}</strong>
+          <em>prog ${escapeHtml(t.salida_prog || "--:--")}</em></span>
+        <span><small>Turno</small><strong>${t.turno ?? "—"}</strong>
+          <em>${escapeHtml(t.vehiculo || "")}</em></span>
+      </div>
+      <div class="programacion-estado">
+        Este conductor <strong>ya registró la entrada y la salida</strong> de su turno programado,
+        así que su jornada está cerrada y <strong>no se permite otra marca</strong>.
+        <br>Si hay algo que corregir, hazlo en
+        <strong>Administración › Verificador de horarios</strong>.
+      </div>`;
+    banner.classList.remove("hidden");
+    if (window.lucide?.createIcons) window.lucide.createIcons();
+    return;
+  }
+
+  const turno = turnoProgramadoActual();
+
+  // ---- Sin programacion: se explica POR QUE, segun el cargo ----
+  if (!turno) {
+    const cargo = state.csvCandidate?.cargo || "";
+    const etiqueta = cargoSinProgramacion(cargo);
+    const esConductor = isDriverCargo(cargo);
+
+    const anuncio = anuncioSentidoHtml(state.nextSentido || "entrada", null);
+
+    if (esConductor) {
+      // Un conductor SIEMPRE deberia tener turno: esto es una alerta real.
+      banner.className = "programacion-banner tarde";
+      banner.innerHTML = `
+        ${anuncio}
+        <div class="programacion-titulo">
+          <i data-lucide="alert-triangle"></i>
+          Conductor sin turno programado hoy
+        </div>
+        <div class="programacion-estado">
+          Este conductor <strong>no aparece en la programación de hoy</strong>. Puede que la
+          programación no se haya cargado o que su nombre no esté cruzado.
+          <br><strong>Avisa a administración</strong> antes de registrar. Mientras tanto, el tipo
+          de marca se define por la última marca: <strong>verifícalo abajo</strong> antes de guardar.
+        </div>`;
+    } else {
+      banner.className = "programacion-banner info";
+      banner.innerHTML = `
+        ${anuncio}
+        <div class="programacion-titulo">
+          <i data-lucide="info"></i>
+          Sin turno programado ${etiqueta ? `· ${escapeHtml(etiqueta)}` : ""}
+        </div>
+        <div class="programacion-estado">
+          ${etiqueta
+            ? `Los cargos de <strong>${escapeHtml(etiqueta)}</strong> no manejan programación de turnos,
+               así que no hay horario contra el cual comparar.`
+            : `Este cargo no tiene programación de turnos cargada.`}
+          El tipo de marca (entrada/salida) se define por la última marca registrada:
+          <strong>revísalo abajo</strong> y corrígelo si no corresponde.
+        </div>`;
+    }
+    banner.classList.remove("hidden");
+    if (window.lucide?.createIcons) window.lucide.createIcons();
+    return;
+  }
+
+  // ---- Con programacion: se muestra el turno y como va frente a el ----
   const sentido = state.nextSentido || "entrada";
   const horaRef = sentido === "salida" ? turno.hora_salida : turno.hora_entrada;
   const dif = minutosDesdeProgramado(horaRef);
   const evaluable = !(sentido === "salida" && turno.turno === 1);
 
   let estado = "";
+  let insignia = "";
   let clase = "programacion-banner";
   if (horaRef && dif !== null && evaluable) {
-    if (sentido !== "salida" && dif > PUNTUALIDAD_TOLERANCIA_MIN) {
+    // "Antes" en la entrada y "después" en la salida son lo habitual: no se pintan
+    // como falta. Solo se resalta lo que de verdad se sale del comportamiento normal.
+    const fuera = excedeUmbralHorario(sentido, dif);
+    if (fuera) {
       clase += " tarde";
-      estado = `Vas <strong>${dif} min tarde</strong> frente a la hora programada.`;
-    } else if (sentido === "salida" && dif < -PUNTUALIDAD_TOLERANCIA_MIN) {
-      clase += " tarde";
-      estado = `Estas saliendo <strong>${Math.abs(dif)} min antes</strong> de la hora fin.`;
+      insignia = `<span class="prog-chip tarde">${Math.abs(dif)} min ${dif > 0 ? "después" : "antes"}</span>`;
+      estado = `Está marcando <strong>${Math.abs(dif)} min ${dif > 0 ? "después" : "antes"}</strong> `
+             + `de su hora programada (${escapeHtml(horaRef)}), fuera de lo habitual.`;
     } else if (Math.abs(dif) <= PUNTUALIDAD_TOLERANCIA_MIN) {
       clase += " ok";
-      estado = "Vas <strong>a tiempo</strong>.";
+      insignia = `<span class="prog-chip ok">A tiempo</span>`;
+      estado = `Va <strong>a tiempo</strong> frente a su hora programada (${escapeHtml(horaRef)}).`;
     } else {
       clase += " ok";
-      estado = `Vas <strong>${Math.abs(dif)} min antes</strong> de la hora programada.`;
+      insignia = `<span class="prog-chip ok">${Math.abs(dif)} min ${dif > 0 ? "después" : "antes"}</span>`;
+      estado = `Va <strong>${Math.abs(dif)} min ${dif > 0 ? "después" : "antes"}</strong> `
+             + `de las ${escapeHtml(horaRef)}, dentro de lo habitual.`;
     }
   } else if (!evaluable) {
-    estado = "La salida del turno 1 no se compara: la programacion no registra la hora de relevo.";
+    insignia = `<span class="prog-chip neutro">No evaluable</span>`;
+    estado = "La salida del turno 1 no se compara: la programación no registra la hora de relevo.";
   }
+
+  // Invitacion a corregir solo cuando el desfase se sale de lo habitual.
+  const aviso = (evaluable && excedeUmbralHorario(sentido, dif))
+    ? `<div class="programacion-aviso">
+         <i data-lucide="help-circle"></i>
+         Hay <strong>${Math.abs(dif)} min</strong> de diferencia con lo programado. Si el tipo de
+         marca no corresponde, <strong>corrígelo abajo</strong> antes de registrar.
+       </div>`
+    : "";
 
   banner.className = clase;
   banner.innerHTML = `
+    ${anuncioSentidoHtml(sentido, turno)}
     <div class="programacion-titulo">
       <i data-lucide="calendar-clock"></i>
       Turno ${turno.turno} programado hoy
+      ${insignia}
     </div>
+    ${lineaDeTiempoTurno(turno)}
     <div class="programacion-horas">
-      <span>Entrada <strong>${escapeHtml(turno.hora_entrada || "--:--")}</strong></span>
-      <span>Salida <strong>${escapeHtml(turno.hora_salida || "--:--")}</strong></span>
-      ${turno.vehiculo ? `<span>Vehiculo <strong>${escapeHtml(turno.vehiculo)}</strong></span>` : ""}
+      ${turno.vehiculo ? `<span>Vehículo <strong>${escapeHtml(turno.vehiculo)}</strong></span>` : ""}
       ${turno.base ? `<span>${escapeHtml(turno.base)}</span>` : ""}
       ${turno.puesto ? `<span>${escapeHtml(turno.puesto)}</span>` : ""}
     </div>
     ${estado ? `<div class="programacion-estado">${estado}</div>` : ""}
+    ${aviso}
   `;
   banner.classList.remove("hidden");
   if (window.lucide?.createIcons) window.lucide.createIcons();
@@ -2345,13 +3465,17 @@ async function cargarProgramacionDia(dni) {
       p_fecha: getReportParts().date
     });
     if (error) throw error;
-    if (!data?.ok || !data.existe) return;
 
-    state.programacionHoy = data;
-    autocompletarDesdeProgramacion();
+    if (data?.ok && data.existe) {
+      state.programacionHoy = data;
+      autocompletarDesdeProgramacion();
+    }
+    // Se pinta siempre: sin programacion el aviso explica POR QUE no la hay
+    // (gestores, auxiliares...) o alerta si es un conductor, que si deberia tenerla.
     renderProgramacionBanner();
   } catch (e) {
     console.warn("No se pudo consultar la programacion del dia:", e?.message || e);
+    renderProgramacionBanner();
   }
 }
 
@@ -2396,6 +3520,166 @@ async function confirmarVehiculoProgramado() {
     "Sí, registrar",
     "Corregir vehículo"
   );
+}
+
+// Umbrales (min) para ALERTAR cuando la hora marcada no concuerda con la programada.
+// Son ASIMETRICOS porque el comportamiento real lo es: medido sobre 5.488 marcas
+// (jul-ago 2026) contra su turno programado:
+//   ENTRADA  mediana -17 min  (entrar temprano es lo normal; 18% entra >1 h antes)
+//   SALIDA   mediana +28 min  (cerrar tarde es lo normal; 36% cierra >1 h tarde,
+//                              26% >1,5 h y 12% >2,5 h)
+// Con un umbral unico de 60 min se alertaria el 36% de las salidas: puro ruido, y el
+// operador termina ignorando el aviso. Con estos, la alerta cae en ~2-3,5% de los
+// casos en cada escenario, que es donde de verdad hay algo raro que mirar.
+const ALERTA_HORARIO = {
+  entrada: { tarde: 60,  antes: 180 },  // alerta 3,5% / 1,9%
+  salida:  { tarde: 240, antes: 180 }   // alerta 3,0% / 2,5%
+};
+
+// True si el desfase se sale de lo habitual para ese sentido.
+function excedeUmbralHorario(sentido, dif) {
+  if (dif === null || dif === undefined) return false;
+  const u = ALERTA_HORARIO[sentido === "salida" ? "salida" : "entrada"];
+  return dif > 0 ? dif > u.tarde : Math.abs(dif) > u.antes;
+}
+
+// Aviso si la hora de la marca no concuerda con el horario programado del turno.
+// No bloquea: la operacion cambia y la programacion puede quedar desactualizada,
+// pero deja constancia visible a quien registra para que revise antes de guardar.
+async function confirmarHorarioProgramado(sentido) {
+  const turno = turnoProgramadoActual();
+  if (!turno) return true; // sin programacion del dia: no hay contra que comparar
+
+  // La salida del turno 1 no tiene hora de relevo registrada: no se evalua.
+  if (sentido === "salida" && turno.turno === 1) return true;
+
+  const horaRef = sentido === "salida" ? turno.hora_salida : turno.hora_entrada;
+  const dif = minutosDesdeProgramado(horaRef);
+  if (!horaRef || dif === null) return true;
+  if (!excedeUmbralHorario(sentido, dif)) return true; // dentro de lo habitual
+
+  const horaMarca = getReportParts().time.slice(0, 5);
+  const etiqueta = sentido === "salida" ? "SALIDA" : "ENTRADA";
+  const desfase = dif > 0 ? `${dif} min después` : `${Math.abs(dif)} min antes`;
+
+  // Solo se pregunta una vez por combinacion, para no repetir el modal.
+  const clave = `${sentido}|${horaRef}|${horaMarca}`;
+  if (state.programacionAvisoHorario === clave) return true;
+  state.programacionAvisoHorario = clave;
+
+  return confirmGraphical(
+    "Horario distinto al programado",
+    `El horario programado de ${etiqueta.toLowerCase()} de hoy es ${horaRef}, `
+    + `pero estás marcando ${etiqueta} a las ${horaMarca} (${desfase} de lo programado). `
+    + `¿Deseas registrar la marca así?`,
+    "Sí, registrar",
+    "Revisar hora"
+  );
+}
+
+/* --------------------------------------------------------------------------
+   El HORARIO decide si la persona esta llegando o saliendo
+   Antes el sentido salia solo de "hay una entrada abierta", asi que un turno sin
+   cerrar convertia la LLEGADA del dia siguiente en una SALIDA (sentido invertido)
+   y el error se arrastraba en cascada. La programacion sabe cual de las dos es.
+   -------------------------------------------------------------------------- */
+
+// Si la marca queda a mas de esto de cualquier hora programada, el horario no es
+// una referencia confiable y se vuelve a la logica por ultima marca.
+const SENTIDO_PROG_MAX_MIN = 180;
+
+// Devuelve { sentido, dist, minutos, turno } segun la hora programada mas cercana,
+// o null si no hay programacion del dia.
+function sentidoSugeridoPorProgramacion() {
+  const turnos = state.programacionHoy?.turnos || [];
+  if (!turnos.length) return null;
+
+  let mejor = null;
+  for (const t of turnos) {
+    const refs = [["entrada", t.hora_entrada], ["salida", t.hora_salida]];
+    for (const [sentido, hora] of refs) {
+      if (!hora) continue;
+      const dif = minutosDesdeProgramado(hora);
+      if (dif === null) continue;
+      const dist = Math.abs(dif);
+      if (!mejor || dist < mejor.dist) mejor = { sentido, dist, minutos: dif, turno: t };
+    }
+  }
+  return mejor;
+}
+
+// Cierra el turno anterior en su hora PROGRAMADA de salida y deja la marca de hoy
+// como ENTRADA. Devuelve true si el turno quedo cerrado.
+async function ofrecerCierreTurnoAnterior(sug) {
+  const open = state.openEntrada;
+  if (!open?.id) return false;
+  const horaAbierta = String(open.hora || "").slice(0, 5);
+  const horaTurno = sug?.turno?.hora_entrada || "";
+
+  const ok = await confirmGraphical(
+    "Turno anterior sin cerrar",
+    `Este conductor tiene una ENTRADA abierta del ${open.fecha} ${horaAbierta} sin salida. `
+    + `Según su programación, ahora está ENTRANDO a su turno de las ${horaTurno}. `
+    + "Se cerrará el turno anterior en su hora programada de salida (queda marcado para "
+    + "revisión de administración) y esta marca se registrará como ENTRADA.",
+    "Cerrar anterior y registrar ENTRADA",
+    "Registrar SALIDA"
+  );
+  if (!ok) return false;
+
+  try {
+    const { data, error } = await supabaseClient.rpc("cerrar_turno_automatico", {
+      p_entrada_id: open.id, p_hora: null
+    });
+    if (error) throw new Error(error.message);
+    if (!data?.ok) {
+      showAlertModal(
+        "No se pudo cerrar el turno anterior",
+        `${data?.error || "Error cerrando el turno."} `
+        + "Puedes registrar la SALIDA aquí, o corregirlo desde Administración › Verificador de horarios."
+      );
+      return false;
+    }
+    // El turno quedo cerrado: se recarga el estado para que ya no figure abierto.
+    await loadLastAttendance(state.colaborador?.dni || open.dni);
+    computeOpenEntrada();
+    setMessage(elements.formMessage,
+      `Turno del ${data.entrada_fecha} cerrado automáticamente a las ${data.hora}. `
+      + "Ahora registra la ENTRADA de hoy.", "success");
+    return true;
+  } catch (e) {
+    showAlertModal("No se pudo cerrar el turno anterior", e.message || String(e));
+    return false;
+  }
+}
+
+// Decide el sentido inicial dando prioridad a la programacion sobre la ultima marca.
+async function resolverSentidoInicial() {
+  const sug = sentidoSugeridoPorProgramacion();
+  state.sentidoSegunProgramacion = sug;
+  state.sentidoForzadoManual = false;
+
+  // Sin turno abierto solo cabe una ENTRADA (una salida sin entrada se rechaza).
+  if (!state.openEntrada) {
+    state.nextSentido = "entrada";
+    return;
+  }
+
+  // Sin programacion confiable se conserva el criterio anterior.
+  if (!sug || sug.dist > SENTIDO_PROG_MAX_MIN) {
+    state.nextSentido = "salida";
+    return;
+  }
+
+  // El horario dice que esta LLEGANDO pero arrastra un turno sin cerrar:
+  // se cierra el viejo en vez de invertir el sentido de esta marca.
+  if (sug.sentido === "entrada") {
+    const cerrado = await ofrecerCierreTurnoAnterior(sug);
+    state.nextSentido = cerrado ? "entrada" : "salida";
+    return;
+  }
+
+  state.nextSentido = "salida";
 }
 
 /* ==========================================================================
@@ -2626,9 +3910,12 @@ async function buscarColaborador() {
   await loadLastAttendance(dni);
   await loadLastEntradaForDni(dni);
   computeOpenEntrada();
-  state.nextSentido = state.openEntrada ? "salida" : "entrada";
-  renderSentidoSelector();
+  // El horario se consulta ANTES de decidir el sentido: la programacion sabe si la
+  // persona esta llegando o saliendo, la ultima marca solo sabe que paso antes.
   await cargarProgramacionDia(dni);
+  await cargarEstadoTurno(dni);
+  await resolverSentidoInicial();
+  renderSentidoSelector();
   const faceStatus = state.isDriverCandidate
     ? (data?.rostro_enrolado ? "Conductor con rostro enrolado: se intentara validacion biometrica." : "Conductor sin rostro enrolado: se intentara detectar rostro.")
     : "Foto obligatoria como evidencia. Biometria no requerida para este cargo.";
@@ -2658,8 +3945,8 @@ async function buscarColaborador() {
     ? "Cedula activa. Ubica el rostro dentro del recuadro para la validacion biometrica."
     : "Cedula activa. Toma la foto de evidencia para continuar.", "success");
 
-  if (openInfo) {
-    // Turno abierto: se cierra marcando la SALIDA biometrica aqui en el punto.
+  if (openInfo && state.nextSentido === "salida") {
+    // Turno abierto que SI corresponde cerrar (el horario no lo contradijo).
     setSentido("salida");
     setMessage(elements.formMessage, "Este colaborador tiene un turno abierto. Toma la foto y registra su SALIDA biometrica para cerrarlo.", "success");
   } else if (state.nextSentido === "entrada" && state.lastAttendance?.sentido === "salida") {
@@ -3461,6 +4748,32 @@ async function submitAttendance(event) {
     return;
   }
 
+  // La jornada del turno ya cumplida (entrada + salida) NO admite otra marca. Se
+  // revalida contra la base y no contra el estado en pantalla, que puede estar viejo
+  // si la pagina llevaba rato abierta o si alguien mas registro entre tanto.
+  try {
+    const { data: estado } = await supabaseClient.rpc("estado_turno_actual", {
+      p_dni: dni, p_momento: null
+    });
+    if (estado?.ok && estado.existe && estado.completa) {
+      state.turnoEstado = estado;
+      renderProgramacionBanner();
+      showAlertModal(
+        "Jornada ya cumplida",
+        `Este conductor ya registró la ENTRADA (${estado.entrada_real || "--:--"}) y la SALIDA `
+        + `(${estado.salida_real || "--:--"}) de su turno ${estado.turno ?? ""} programado `
+        + `(${estado.entrada_prog || "--:--"} a ${estado.salida_prog || "--:--"}). `
+        + "Su jornada está cerrada y no se permite otra marca. "
+        + "Si hay que corregir algo, hazlo desde Administración › Verificador de horarios."
+      );
+      setMessage(elements.formMessage,
+        "Registro bloqueado: la jornada de este turno ya está cumplida.", "error");
+      return;
+    }
+  } catch (e) {
+    console.warn("No se pudo revalidar el estado del turno:", e?.message || e);
+  }
+
   if (!state.faceValidated || !state.compressedFile) {
     setMessage(elements.formMessage, "Primero toma la foto de evidencia.", "error");
     setWorkflowState("photo");
@@ -3539,6 +4852,13 @@ async function submitAttendance(event) {
   const sentidoConfirmado = await confirmarCoherenciaTurno(state.nextSentido);
   if (!sentidoConfirmado) {
     setMessage(elements.formMessage, "Registro cancelado. Revisa el tipo de marca (entrada o salida) segun corresponda.", "");
+    return;
+  }
+
+  // Si la hora no concuerda con el horario programado del turno, se avisa (no bloquea).
+  const seguirConHorario = await confirmarHorarioProgramado(sentidoConfirmado);
+  if (!seguirConHorario) {
+    setMessage(elements.formMessage, "Registro cancelado. Revisa la hora frente al horario programado.", "");
     return;
   }
 
@@ -3857,7 +5177,10 @@ async function submitAttendance(event) {
     resetAttendanceForm(true);
     elements.dniInput.value = colaboradorDni;
     await loadLastAttendance(colaboradorDni);
+    state.sentidoForzadoManual = false;
     state.nextSentido = getNextSentidoFromLastAttendance();
+    // Si con esta marca la jornada quedo completa, el aviso lo debe reflejar de una.
+    await cargarEstadoTurno(colaboradorDni);
   } catch (error) {
     const inconsistente = bukAceptado && !marcaGuardadaLocal;
     if (inconsistente) {
@@ -4175,13 +5498,13 @@ function renderSentidoSelector() {
   elements.sentidoEntradaButton.classList.toggle("active", state.nextSentido === "entrada");
   elements.sentidoSalidaButton.classList.toggle("active", state.nextSentido === "salida");
 
-  // El tipo de marca NO es manipulable por el administrador: lo fija el factor
-  // dinamico (la ultima marca / turno abierto). Se bloquean los botones.
-  const bloquear = state.isAdmin;
-  elements.sentidoEntradaButton.disabled = bloquear;
-  elements.sentidoSalidaButton.disabled = bloquear;
-  elements.sentidoEntradaButton.classList.toggle("locked", bloquear);
-  elements.sentidoSalidaButton.classList.toggle("locked", bloquear);
+  // El tipo de marca lo decide el sistema (horario programado y, si no hay, la
+  // ultima marca), pero se puede corregir confirmando: bloquearlo del todo obligaba
+  // al operador a registrar el sentido equivocado cuando quedaba un turno sin cerrar.
+  elements.sentidoEntradaButton.disabled = false;
+  elements.sentidoSalidaButton.disabled = false;
+  elements.sentidoEntradaButton.classList.remove("locked");
+  elements.sentidoSalidaButton.classList.remove("locked");
 
   const suggested = getNextSentidoFromLastAttendance();
   if (!elements.sentidoSuggestion) return;
@@ -4189,13 +5512,43 @@ function renderSentidoSelector() {
     elements.sentidoSuggestion.textContent = "";
     return;
   }
-  if (bloquear) {
-    elements.sentidoSuggestion.textContent = `Definido automáticamente por la última marca: ${state.nextSentido.toUpperCase()} (no editable).`;
+
+  const prog = state.sentidoSegunProgramacion;
+  const actual = state.nextSentido.toUpperCase();
+  if (state.sentidoForzadoManual) {
+    elements.sentidoSuggestion.textContent =
+      `${actual} elegido a mano (el sistema sugería ${(prog?.sentido || suggested).toUpperCase()}).`;
+  } else if (prog && prog.dist <= SENTIDO_PROG_MAX_MIN) {
+    const horaRef = prog.sentido === "salida" ? prog.turno?.hora_salida : prog.turno?.hora_entrada;
+    elements.sentidoSuggestion.textContent =
+      `${actual} — según su turno programado de ${horaRef || "--:--"}. Puedes corregirlo si no corresponde.`;
   } else if (state.nextSentido === suggested) {
     elements.sentidoSuggestion.textContent = `Sugerido por la ultima marca: ${suggested}.`;
   } else {
     elements.sentidoSuggestion.textContent = `Estas registrando ${state.nextSentido} (sugerido era ${suggested}).`;
   }
+}
+
+// Cambio manual del sentido: se pide confirmacion porque contradice lo que el
+// sistema dedujo del horario / la ultima marca, y queda anotado en la observacion.
+async function cambiarSentidoManual(sentido) {
+  if (sentido === state.nextSentido) return;
+  const prog = state.sentidoSegunProgramacion;
+  const motivo = (prog && prog.dist <= SENTIDO_PROG_MAX_MIN)
+    ? `Su turno programado indica ${prog.sentido.toUpperCase()}`
+    : (state.openEntrada
+        ? `Tiene un turno ABIERTO del ${state.openEntrada.fecha}`
+        : "No tiene un turno abierto");
+  const ok = await confirmGraphical(
+    "Cambiar el tipo de marca",
+    `${motivo}, pero vas a registrar una ${sentido.toUpperCase()}. `
+    + "Hazlo solo si de verdad corresponde: un sentido equivocado descuadra la jornada y la nómina.",
+    `Sí, registrar ${sentido.toUpperCase()}`,
+    "Cancelar"
+  );
+  if (!ok) return;
+  state.sentidoForzadoManual = true;
+  setSentido(sentido);
 }
 
 function setSentido(sentido) {
@@ -4386,15 +5739,13 @@ async function confirmarCoherenciaTurno(sentido) {
   // muestra un modal explicando la situacion y ofreciendo la accion correcta.
   // Devuelve el sentido con el que continuar, o null si el usuario cancela.
   if (sentido === "entrada" && state.openEntrada) {
-    const hora = String(state.openEntrada.hora || "").slice(0, 5);
-    const cambiar = await confirmGraphical(
-      "Ya hay una entrada abierta",
-      `Este colaborador tiene una ENTRADA abierta del ${state.openEntrada.fecha} ${hora} sin registrar salida. No se puede registrar otra entrada. ¿Quieres registrar la SALIDA de ese turno?`,
-      "Sí, registrar salida",
-      "Cancelar"
-    );
-    if (cambiar) { setSentido("salida"); return "salida"; }
-    return null;
+    // No se puede tener dos entradas abiertas. En vez de obligar a invertir el
+    // sentido, se ofrece cerrar el turno viejo en su hora programada.
+    const cerrado = await ofrecerCierreTurnoAnterior(state.sentidoSegunProgramacion);
+    if (cerrado) return "entrada";
+    if (!state.openEntrada) return "entrada";
+    setSentido("salida");
+    return "salida";
   }
 
   if (sentido === "salida" && !state.openEntrada) {
@@ -7212,6 +8563,12 @@ elements.celularComprobanteInput?.addEventListener("blur", (event) => {
 elements.puntualidadBuscarButton?.addEventListener("click", cargarPuntualidad);
 elements.puenteResolverButton?.addEventListener("click", resolverNombresProgramacion);
 elements.jornadasBuscarButton?.addEventListener("click", cargarJornadasAnomalas);
+elements.jornadasExportButton?.addEventListener("click", exportarJornadasCsv);
+elements.jornadasDetalle?.addEventListener("click", (event) => {
+  const btn = event.target.closest(".jornada-corregir");
+  if (!btn) return;
+  corregirDesdeError(btn.dataset.dni, btn.dataset.fecha);
+});
 elements.horarioBuscarButton?.addEventListener("click", cargarHorario);
 elements.horarioExportButton?.addEventListener("click", exportarHorarioCsv);
 elements.base3BuscarButton?.addEventListener("click", cargarBase3);
@@ -7228,6 +8585,90 @@ elements.jornadasFiltros?.addEventListener("click", (event) => {
   if (!chip) return;
   state.jornadasFiltro = chip.dataset.jornadaFiltro || "";
   renderJornadasAnomalas();
+});
+elements.verificadorBuscarButton?.addEventListener("click", cargarVerificador);
+elements.verificadorDiaButton?.addEventListener("click", cargarVerificadorDia);
+elements.verificadorDesfasesButton?.addEventListener("click", cargarVerificadorDesfases);
+elements.verificadorGestoresButton?.addEventListener("click", cargarVerificadorGestores);
+elements.verificadorExportButton?.addEventListener("click", exportarVerificadorCsv);
+elements.verificadorFiltrarButton?.addEventListener("click", () => rerenderVerificador());
+// Al cambiar una fecha se vuelve a consultar sola, respetando el modo activo, para
+// que la tabla no quede con el rango anterior.
+[elements.verificadorDesdeInput, elements.verificadorHastaInput].forEach((inp) => {
+  inp?.addEventListener("change", () => {
+    if (!state.verificadorLoaded) return;
+    if (state.verificadorModo === "dia") cargarVerificadorDia();
+    else if (state.verificadorModo === "desfases") cargarVerificadorDesfases();
+    else if (state.verificadorModo === "gestores") cargarVerificadorGestores();
+    else cargarVerificador();
+  });
+});
+elements.verificadorBuscarInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); rerenderVerificador(); }
+});
+// Filtra en vivo mientras se escribe (sin tener que dar clic ni Enter).
+elements.verificadorBuscarInput?.addEventListener("input", () => {
+  if (state.verificadorData || state.verificadorDiaData) rerenderVerificador();
+});
+elements.verificadorFiltros?.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-verif-filtro]");
+  if (!chip) return;
+  state.verificadorFiltro = chip.dataset.verifFiltro || "";
+  renderVerificador();
+});
+elements.verificadorDetalle?.addEventListener("click", (event) => {
+  // Botón de eliminar: borra esa marca (entrada o salida).
+  const del = event.target.closest(".verif-borrar");
+  if (del) {
+    borrarMarcaVerificador(del.closest(".verif-row"), del.dataset.sentido);
+    return;
+  }
+  // Botón del reloj: abre el selector nativo de hora.
+  const pick = event.target.closest(".verif-hora-pick");
+  if (pick) {
+    const wrap = pick.parentElement;
+    const nativo = wrap.querySelector(".verif-hora-native");
+    const texto = wrap.querySelector(".verif-hora");
+    if (nativo) {
+      const norm = normalizeHoraInput(texto?.value); // parte del valor ya escrito
+      if (norm) nativo.value = norm;
+      if (typeof nativo.showPicker === "function") {
+        try { nativo.showPicker(); } catch (e) { nativo.focus(); }
+      } else {
+        nativo.focus();
+        nativo.click();
+      }
+    }
+    return;
+  }
+  const btn = event.target.closest(".verif-guardar");
+  if (!btn) return;
+  guardarHorasVerificador(btn.closest(".verif-row"));
+});
+// Al elegir en el reloj, copia la hora (24 h) al campo de texto.
+elements.verificadorDetalle?.addEventListener("change", (event) => {
+  const nativo = event.target.closest?.(".verif-hora-native");
+  if (!nativo || !nativo.value) return;
+  const texto = nativo.parentElement.querySelector(".verif-hora");
+  if (texto) texto.value = nativo.value;
+});
+// Al salir de un campo de texto de hora se reformatea a HH:MM (ej. "2338" -> "23:38").
+elements.verificadorDetalle?.addEventListener("focusout", (event) => {
+  const inp = event.target.closest?.(".verif-hora");
+  if (!inp || inp.disabled || inp.classList.contains("verif-hora-native")) return;
+  const norm = normalizeHoraInput(inp.value);
+  if (norm) inp.value = norm;
+});
+// Si vuelven a editar una fila ya guardada, se quita el check para poder re-guardar.
+elements.verificadorDetalle?.addEventListener("input", (event) => {
+  const inp = event.target.closest?.(".verif-hora");
+  if (!inp) return;
+  const row = inp.closest(".verif-row");
+  if (row?.classList.contains("verif-guardado")) {
+    row.classList.remove("verif-guardado");
+    const b = row.querySelector(".verif-guardar");
+    if (b) { b.classList.remove("ok"); b.textContent = "Guardar"; }
+  }
 });
 elements.cameraButton.addEventListener("click", startCamera);
 elements.locationButton.addEventListener("click", captureCurrentLocation);
@@ -7290,14 +8731,8 @@ elements.adminSubtabs?.addEventListener("click", (event) => {
 elements.attendanceForm.addEventListener("submit", submitAttendance);
 elements.reportDateInput.addEventListener("input", () => { state.reportDateTouched = true; });
 elements.reportTimeInput.addEventListener("input", () => { state.reportTimeTouched = true; });
-elements.sentidoEntradaButton.addEventListener("click", () => {
-  if (state.isAdmin) { setMessage(elements.formMessage, "El tipo de marca lo define el sistema según la última marca. No es editable.", "error"); return; }
-  setSentido("entrada");
-});
-elements.sentidoSalidaButton.addEventListener("click", () => {
-  if (state.isAdmin) { setMessage(elements.formMessage, "El tipo de marca lo define el sistema según la última marca. No es editable.", "error"); return; }
-  setSentido("salida");
-});
+elements.sentidoEntradaButton.addEventListener("click", () => cambiarSentidoManual("entrada"));
+elements.sentidoSalidaButton.addEventListener("click", () => cambiarSentidoManual("salida"));
 elements.refreshButton.addEventListener("click", refreshCurrentHistory);
 elements.historySearchButton.addEventListener("click", refreshCurrentHistory);
 elements.historyDniInput.addEventListener("keydown", (event) => {
