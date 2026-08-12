@@ -1283,6 +1283,17 @@ svg {
   margin-bottom: 3px;
 }
 
+/* Lo que pasa del maximo de Buk se dice en rojo, no en gris: esa marca no va a nomina. */
+.cierre-alerta {
+  color: #b00020;
+  font-weight: 700;
+}
+
+/* Jornadas +16 h sin explicar: son el pendiente real, tienen que saltar a la vista. */
+.je-sinexplicar {
+  background: #fdecec;
+}
+
 /* Bitacora de cierres: resalta lo que administracion ya corrigio a mano. */
 .ct-corregida {
   background: #fff7e6;

@@ -84,6 +84,8 @@ const state = {
   // Motivo que digita quien registra cuando la marca no concuerda con el horario
   // (p.ej. "estaba en el taller"). Se guarda en la observacion de la marca.
   motivoDesfase: "",
+  motivoJornadaExtendida: "",
+  horasJornadaExtendida: null,
   // Estado del turno programado que corresponde a este momento (RPC estado_turno_actual).
   // Si viene `completa`, la jornada ya se cumplio y NO se admite otra marca.
   turnoEstado: null,
@@ -101,6 +103,7 @@ const state = {
   verificadorDesfasesData: null,
   verificadorGestoresData: null,
   verificadorCierresData: null,
+  verificadorExcedidasData: null,
   // Turno anterior sin cerrar que hay que declarar antes de admitir la ENTRADA de hoy.
   cierrePendiente: null,
   horarioLoaded: false,
@@ -294,6 +297,7 @@ const elements = {
   verificadorDesfasesButton: $("#verificadorDesfasesButton"),
   verificadorGestoresButton: $("#verificadorGestoresButton"),
   verificadorCierresButton: $("#verificadorCierresButton"),
+  verificadorExcedidasButton: $("#verificadorExcedidasButton"),
   verificadorExportButton: $("#verificadorExportButton"),
   verificadorStatus: $("#verificadorStatus"),
   verificadorFiltros: $("#verificadorFiltros"),
@@ -2174,12 +2178,146 @@ function renderVerificadorCierres() {
   `;
 }
 
+/* --------------------------------------------------------------------------
+   Jornadas de mas de 16 h: la novedad que Buk rechaza.
+   Las crea un trigger en la base, asi que ninguna se pierde aunque la marca se
+   haya hecho por otra via. Lo que importa aqui es la columna "sin explicar":
+   son las que nadie ha respondido todavia.
+   -------------------------------------------------------------------------- */
+
+async function cargarVerificadorExcedidas() {
+  const desde = elements.verificadorDesdeInput?.value;
+  const hasta = elements.verificadorHastaInput?.value;
+  if (!desde || !hasta) {
+    setMessage(elements.verificadorMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.verificadorMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+
+  setBusy(elements.verificadorExcedidasButton, true);
+  setMessage(elements.verificadorMessage, "");
+  elements.verificadorStatus.textContent = "Consultando jornadas extendidas...";
+
+  try {
+    const { data, error } = await supabaseClient.rpc("reporte_jornadas_excedidas", {
+      p_desde: desde, p_hasta: hasta
+    });
+    if (error) throw error;
+    if (!data?.ok) throw new Error(data?.error || "No se pudo generar el reporte.");
+
+    state.verificadorLoaded = true;
+    state.verificadorModo = "excedidas";
+    state.verificadorExcedidasData = data;
+    renderVerificadorExcedidas();
+  } catch (e) {
+    elements.verificadorStatus.textContent = "No se pudieron consultar las jornadas extendidas.";
+    setMessage(elements.verificadorMessage, e?.message || "Error consultando el reporte.", "error");
+  } finally {
+    setBusy(elements.verificadorExcedidasButton, false);
+  }
+}
+
+function renderVerificadorExcedidas() {
+  const data = state.verificadorExcedidasData;
+  if (!data) return;
+  const t = data.totales || {};
+  const limite = data.limite ?? LIMITE_HORAS_JORNADA;
+  let detalle = data.detalle || [];
+
+  elements.verificadorStatus.textContent =
+    `${data.desde} a ${data.hasta} · ${t.jornadas ?? 0} jornadas de más de ${limite} h`;
+  elements.verificadorFiltros.innerHTML = "";
+
+  elements.verificadorTotales.innerHTML = `
+    <div class="punt-card"><span>${t.jornadas ?? 0}</span><small>jornadas +${limite} h</small></div>
+    <div class="punt-card falta"><span>${t.sin_explicar ?? 0}</span><small>sin explicar</small></div>
+    <div class="punt-card falta"><span>${t.rechazadas_buk ?? 0}</span><small>rechazadas por Buk</small></div>
+    <div class="punt-card"><span>${t.horas_max != null ? t.horas_max + " h" : "—"}</span><small>la más larga</small></div>
+  `;
+
+  const q = (elements.verificadorBuscarInput?.value || "").trim().toLowerCase();
+  if (q) {
+    detalle = detalle.filter((x) =>
+      `${x.nombre || ""} ${x.dni || ""} ${x.motivo || ""} ${x.explicado_nombre || ""}`
+        .toLowerCase().includes(q));
+  }
+
+  if (!detalle.length) {
+    elements.verificadorDetalle.innerHTML = "";
+    setMessage(elements.verificadorMessage,
+      (data.detalle || []).length
+        ? "Sin resultados con ese filtro."
+        : `Ninguna jornada pasó de ${limite} h en ese rango. 👌`, "success");
+    return;
+  }
+  setMessage(elements.verificadorMessage, "");
+
+  const esc = (v) => escapeHtml(String(v ?? ""));
+  const motivos = data.motivos || [];
+
+  elements.verificadorDetalle.innerHTML = `
+    <p class="field-hint">Buk rechaza toda jornada de más de <strong>${limite} h</strong>
+    ("las marcas excedieron el máximo de horas permitidas"), así que estas marcas están en
+    nuestra base pero <strong>no entraron a nómina</strong>. El límite no es arbitrario:
+    sobre 9.603 jornadas, por debajo de 16 h el rechazo es del 0,1&nbsp;%, y entre 16 y 17 h
+    fueron 26 de 26. Las filas en rojo son las que <strong>nadie ha explicado todavía</strong>.</p>
+
+    <div class="tabla-scroll">
+    <table class="punt-tabla verif-tabla">
+      <thead><tr>
+        <th>Entrada</th><th>Salida</th><th>Persona</th><th>Cédula</th><th>Cargo</th>
+        <th>Jornada</th><th>Exceso</th><th>Buk</th>
+        <th>Explicación</th><th>Explicó</th><th>Cuándo</th>
+      </tr></thead>
+      <tbody>
+        ${detalle.map((d) => `
+          <tr class="${d.sin_explicar ? "je-sinexplicar" : ""}">
+            <td>${esc(d.entrada_fecha || "—")}<br><small>${esc(d.entrada_hora || "")}</small></td>
+            <td>${esc(d.salida_fecha)}<br><small>${esc(d.salida_hora)}</small></td>
+            <td>${esc(d.nombre)}</td>
+            <td>${esc(d.dni)}</td>
+            <td>${esc(d.cargo || "—")}</td>
+            <td><strong class="punt-warn">${d.horas} h</strong></td>
+            <td>+${d.exceso_horas} h</td>
+            <td>${d.rechazada_buk
+                  ? `<span class="jornada-pill jt-larga">Rechazada</span>`
+                  : (d.enviado_buk ? `<span class="jornada-pill jt-ok">Aceptada</span>`
+                                   : `<span class="jornada-pill jt-sincerrar">Sin enviar</span>`)}</td>
+            <td class="ct-motivo">${d.sin_explicar
+                  ? `<strong class="punt-warn">SIN EXPLICAR</strong>` : esc(d.motivo)}</td>
+            <td>${esc(d.explicado_nombre || "—")}</td>
+            <td><small>${esc(d.explicado_at || "—")}</small></td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+    </div>
+
+    ${motivos.length ? `
+    <details class="puntualidad-detalle" open>
+      <summary>Por qué se extendieron (${motivos.length} motivos distintos)</summary>
+      <div class="tabla-scroll">
+      <table class="punt-tabla">
+        <thead><tr><th>Motivo</th><th>Veces</th></tr></thead>
+        <tbody>
+          ${motivos.map((m) => `
+            <tr><td>${esc(m.motivo)}</td><td><strong>${m.veces}</strong></td></tr>`).join("")}
+        </tbody>
+      </table>
+      </div>
+    </details>` : ""}
+  `;
+}
+
 // Re-render según el modo activo (lo usa el filtro de texto).
 function rerenderVerificador() {
   if (state.verificadorModo === "dia") renderVerificadorDia();
   else if (state.verificadorModo === "desfases") renderVerificadorDesfases();
   else if (state.verificadorModo === "gestores") renderVerificadorGestores();
   else if (state.verificadorModo === "cierres") renderVerificadorCierres();
+  else if (state.verificadorModo === "excedidas") renderVerificadorExcedidas();
   else renderVerificador();
 }
 
@@ -2411,6 +2549,7 @@ async function borrarMarcaVerificador(rowEl, sentido) {
     else if (state.verificadorModo === "desfases") await cargarVerificadorDesfases();
     else if (state.verificadorModo === "gestores") await cargarVerificadorGestores();
     else if (state.verificadorModo === "cierres") await cargarVerificadorCierres();
+    else if (state.verificadorModo === "excedidas") await cargarVerificadorExcedidas();
     else await cargarVerificador();
   } catch (e) {
     setMessage(elements.verificadorMessage, `No se pudo eliminar: ${e.message || e}`, "error");
@@ -2424,7 +2563,27 @@ function exportarVerificadorCsv() {
   };
   let header, lineas, nombreArchivo;
 
-  if (state.verificadorModo === "cierres") {
+  if (state.verificadorModo === "excedidas") {
+    const data = state.verificadorExcedidasData;
+    const filas = data?.detalle || [];
+    if (!filas.length) {
+      setMessage(elements.verificadorMessage, "Primero consulta un rango con jornadas extendidas.", "error");
+      return;
+    }
+    header = ["Fecha entrada", "Hora entrada", "Fecha salida", "Hora salida", "Cedula",
+      "Persona", "Cargo", "Jornada (h)", "Limite (h)", "Exceso (h)", "Rechazada por Buk",
+      "Enviada a Buk", "Error Buk", "Explicacion", "Sin explicar", "Explico", "Explicado el"];
+    lineas = [header.join(";")];
+    filas.forEach((d) => {
+      lineas.push([d.entrada_fecha || "", d.entrada_hora || "", d.salida_fecha, d.salida_hora,
+        d.dni, d.nombre, d.cargo || "", d.horas, d.limite_horas, d.exceso_horas,
+        d.rechazada_buk ? "SI" : "NO", d.enviado_buk ? "SI" : "NO", d.buk_error || "",
+        d.motivo || "", d.sin_explicar ? "SI" : "NO",
+        d.explicado_nombre || "", d.explicado_at || ""]
+        .map(esc).join(";"));
+    });
+    nombreArchivo = `jornadas_extendidas_${data.desde}_${data.hasta}.csv`;
+  } else if (state.verificadorModo === "cierres") {
     const data = state.verificadorCierresData;
     const filas = data?.detalle || [];
     if (!filas.length) {
@@ -3360,6 +3519,7 @@ function limpiarProgramacion() {
   state.programacionAvisoVehiculo = "";
   state.programacionAvisoHorario = "";
   state.motivoDesfase = "";
+  state.motivoJornadaExtendida = "";
   state.turnoEstado = null;
   elements.programacionBanner?.classList.add("hidden");
 }
@@ -3861,6 +4021,84 @@ const MOTIVOS_SIN_CIERRE = [
   "Terminó después del cierre del punto"
 ];
 
+/* --------------------------------------------------------------------------
+   Jornadas que superan el maximo de horas que acepta Buk.
+
+   Es el rechazo #1 de Buk ("Las marcas excedieron el máximo de horas permitidas
+   por jornada"): 190 veces entre el 1-jun y el 12-ago-2026. La marca queda en
+   nuestra base pero NO entra a nomina.
+
+   El limite sale de los datos, no de una corazonada. Sobre 9.603 jornadas:
+   por debajo de 16 h el rechazo es del 0,1-3,8 %; entre 16 y 17 h fueron 26 de
+   26, o sea el 100 %. El corte es exacto en 16 h.
+   -------------------------------------------------------------------------- */
+
+const LIMITE_HORAS_JORNADA = 16;
+
+const MOTIVOS_JORNADA_EXTENDIDA = [
+  "El relevo no llegó y le tocó seguir",
+  "Vehículo varado, esperó el auxilio",
+  "Se le olvidó marcar la salida el día anterior",
+  "Apoyo a otro turno por falta de personal",
+  "Novedad en vía que alargó el recorrido",
+  "Error en la hora de la marca de entrada"
+];
+
+// Horas que llevaria la jornada si se cierra en el momento del reporte.
+function horasJornadaAbierta() {
+  const open = state.openEntrada;
+  if (!open?.fecha || !open?.hora) return null;
+  const p = getReportParts();
+  if (!p?.date || !p?.time) return null;
+
+  const ini = new Date(`${open.fecha}T${String(open.hora).slice(0, 8)}`);
+  const fin = new Date(`${p.date}T${p.time.length === 5 ? p.time + ":00" : p.time}`);
+  if (isNaN(ini) || isNaN(fin)) return null;
+  return Math.round(((fin - ini) / 3600000) * 10) / 10;
+}
+
+// Si la salida va a cerrar una jornada de mas de 16 h, se EXIGE la explicacion.
+// No es un aviso que se pueda saltar: Buk va a rechazar la marca y alguien tiene
+// que responder por que paso. Devuelve true si se puede continuar.
+async function confirmarJornadaExtendida(sentido) {
+  state.motivoJornadaExtendida = "";
+  if (sentido !== "salida") return true;
+
+  const horas = horasJornadaAbierta();
+  if (horas === null || horas <= LIMITE_HORAS_JORNADA) return true;
+
+  const open = state.openEntrada;
+  const motivo = await pedirMotivoDesfase(
+    `Jornada de ${horas} h: pasa del máximo`,
+    `La entrada fue el ${open.fecha} a las ${String(open.hora).slice(0, 5)}, así que esta salida `
+    + `cierra una jornada de ${horas} h — ${Math.round((horas - LIMITE_HORAS_JORNADA) * 10) / 10} h `
+    + `por encima del máximo de ${LIMITE_HORAS_JORNADA} h que acepta Buk. `
+    + "La marca se va a guardar, pero Buk la va a rechazar y no entrará a nómina. "
+    + "Explica qué pasó: queda como novedad a tu nombre para que administración la revise.",
+    MOTIVOS_JORNADA_EXTENDIDA
+  );
+  if (motivo === null) return false;
+
+  state.motivoJornadaExtendida = motivo;
+  state.horasJornadaExtendida = horas;
+  return true;
+}
+
+// Guarda la explicacion en la novedad que creo el trigger de la base. Si la jornada
+// no supero el limite, la funcion responde aplica=false y no pasa nada.
+async function explicarJornadaExcedida(salidaId, motivo) {
+  if (!salidaId || !motivo) return;
+  try {
+    await supabaseClient.rpc("explicar_jornada_excedida", {
+      p_salida_id: salidaId, p_motivo: motivo
+    });
+  } catch (e) {
+    // La novedad ya existe sin explicacion: se vera como "sin explicar" en
+    // Administracion, que es justamente lo que no queremos perder.
+    console.warn("No se pudo guardar la explicacion de la jornada extendida:", e?.message || e);
+  }
+}
+
 // Hora de salida PROGRAMADA del turno al que pertenece una entrada abierta. Es la
 // propuesta que se le muestra al operario (editable) y la referencia contra la que
 // despues se mide cuanto se aparto lo que declaro.
@@ -3953,12 +4191,21 @@ function pedirCierreTurno({ open, horaAbierta, turnoProg, horaTurnoHoy, nombre }
       const fechaSalida = (hora && horaAMinutos(hora) <= horaAMinutos(horaAbierta))
         ? sumarDiasIso(open.fecha, 1) : open.fecha;
 
+      // Pasado el maximo de Buk se avisa aqui mismo: la marca se guarda, pero no
+      // entra a nomina y queda como novedad que alguien tendra que responder.
+      const excede = horas != null && horas > LIMITE_HORAS_JORNADA;
+      const avisoHoras = excede
+        ? `<li class="cierre-alerta">Pasa del máximo de <b>${LIMITE_HORAS_JORNADA} h</b> de Buk:
+             la marca <b>no entrará a nómina</b> y queda como novedad de jornada extendida.</li>`
+        : "";
+
       elements.cierreResumen.innerHTML = !hora
         ? `<em>Indica la hora de salida para ver qué se va a guardar.</em>`
         : `<strong>Va a quedar así:</strong>
            <ul>
              <li>SALIDA del <b>${escapeHtml(fechaSalida)}</b> a las <b>${escapeHtml(hora)}</b>${escapeHtml(ajusteTxt)}</li>
-             <li>Jornada resultante: <b>${horas != null ? horas + " h" : "—"}</b></li>
+             <li>Jornada resultante: <b${excede ? ' class="cierre-alerta"' : ""}>${horas != null ? horas + " h" : "—"}</b></li>
+             ${avisoHoras}
              <li>Motivo: ${motivo ? `<b>${escapeHtml(motivo)}</b>` : "<em>pendiente</em>"}</li>
              <li>Queda registrada <b>a tu nombre y con la fecha de hoy</b>, marcada como
                  declarada (no biométrica) y visible en Administración › Verificador de
@@ -4065,6 +4312,12 @@ async function ofrecerCierreTurnoAnterior(sug) {
       );
       return false;
     }
+    // Si el cierre declarado pasa de 16 h, el trigger ya creo la novedad: se le pone
+    // el mismo motivo que dio quien lo declaro, para que no nazca "sin explicar".
+    if (data.horas_jornada > LIMITE_HORAS_JORNADA) {
+      await explicarJornadaExcedida(data.id, decl.motivo);
+    }
+
     // El turno quedo cerrado: se recarga el estado para que ya no figure abierto.
     await loadLastAttendance(dni);
     computeOpenEntrada();
@@ -5338,6 +5591,15 @@ async function submitAttendance(event) {
     return;
   }
 
+  // Jornada de mas de 16 h: Buk la va a rechazar. Explicacion OBLIGATORIA.
+  const seguirConJornada = await confirmarJornadaExtendida(sentidoConfirmado);
+  if (!seguirConJornada) {
+    setMessage(elements.formMessage,
+      "Registro cancelado: una jornada de más de "
+      + `${LIMITE_HORAS_JORNADA} h necesita explicación para poder registrarse.`, "error");
+    return;
+  }
+
   state.submittingMark = true;
   setBusy(elements.submitButton, true);
   elements.submitButton.classList.remove("attention");
@@ -5517,6 +5779,11 @@ async function submitAttendance(event) {
       ? "admin_form"
       : (esMovil ? "movil" : "web");
     const bukObservation = bukOk ? "" : `Buk rechazo la marca: ${bukErrorText}`;
+    // La explicacion de la jornada extendida va tambien en la observacion, para que
+    // se vea en los reportes de siempre y no solo en la pestaña de la novedad.
+    const motivoJornadaObs = state.motivoJornadaExtendida
+      ? `Jornada de ${state.horasJornadaExtendida} h (máx ${LIMITE_HORAS_JORNADA} h): ${state.motivoJornadaExtendida}`
+      : "";
     const payload = {
       colaborador_id: state.colaborador.id,
       obra_id: state.colaborador.obra_id,
@@ -5534,7 +5801,7 @@ async function submitAttendance(event) {
       ubicacion_precision_m: location.precision || null,
       origen,
       registrado_por: state.user.id,
-      observacion: [state.motivoDesfase, userObservation, faceObservation, driverObservation, mobileObservation, fotoWarning, bukObservation].filter(Boolean).join(" | ") || null,
+      observacion: [state.motivoDesfase, motivoJornadaObs, userObservation, faceObservation, driverObservation, mobileObservation, fotoWarning, bukObservation].filter(Boolean).join(" | ") || null,
       celular_comprobante: normalizarCelularCo(elements.celularComprobanteInput?.value)
         || elements.celularComprobanteInput?.value.trim() || null,
       enviado_buk: bukOk,
@@ -5562,6 +5829,12 @@ async function submitAttendance(event) {
     }
 
     marcaGuardadaLocal = true;
+
+    // El trigger de la base ya creo la novedad de jornada extendida (si aplica):
+    // aqui solo se le pone la explicacion que dio quien registro.
+    if (state.motivoJornadaExtendida) {
+      await explicarJornadaExcedida(insertedAttendance?.id, state.motivoJornadaExtendida);
+    }
 
     let sonarData = null;
     if (state.isDriverCandidate && selectedVehicle?.m_id) {
@@ -5655,6 +5928,7 @@ async function submitAttendance(event) {
     await loadLastAttendance(colaboradorDni);
     state.sentidoForzadoManual = false;
     state.motivoDesfase = "";
+    state.motivoJornadaExtendida = "";
     state.nextSentido = getNextSentidoFromLastAttendance();
     // Si con esta marca la jornada quedo completa, el aviso lo debe reflejar de una.
     await cargarEstadoTurno(colaboradorDni);
@@ -6692,7 +6966,8 @@ const MOTIVOS_DESFASE = [
 
 // Pide el MOTIVO de un desfase y lo devuelve como texto, o null si se cancela.
 // Es obligatorio: sin motivo no se registra, para que la novedad quede explicada.
-function pedirMotivoDesfase(titulo, texto) {
+// `motivos` permite cambiar la lista de sugerencias segun el tipo de novedad.
+function pedirMotivoDesfase(titulo, texto, motivos = MOTIVOS_DESFASE) {
   return new Promise((resolve) => {
     const ov = elements.motivoOverlay;
     if (!ov) { resolve(""); return; }   // sin modal en el DOM: no se bloquea el registro
@@ -6701,7 +6976,7 @@ function pedirMotivoDesfase(titulo, texto) {
     elements.motivoText.textContent = texto;
     elements.motivoInput.value = "";
     setMessage(elements.motivoError, "");
-    elements.motivoOpciones.innerHTML = MOTIVOS_DESFASE.map((m) =>
+    elements.motivoOpciones.innerHTML = motivos.map((m) =>
       `<button type="button" class="motivo-chip">${escapeHtml(m)}</button>`).join("");
     ov.classList.remove("hidden");
     setTimeout(() => elements.motivoInput.focus(), 50);
@@ -9168,6 +9443,7 @@ elements.programacionBanner?.addEventListener("click", async (event) => {
 
 elements.verificadorGestoresButton?.addEventListener("click", cargarVerificadorGestores);
 elements.verificadorCierresButton?.addEventListener("click", cargarVerificadorCierres);
+elements.verificadorExcedidasButton?.addEventListener("click", cargarVerificadorExcedidas);
 elements.verificadorExportButton?.addEventListener("click", exportarVerificadorCsv);
 elements.verificadorFiltrarButton?.addEventListener("click", () => rerenderVerificador());
 // Al cambiar una fecha se vuelve a consultar sola, respetando el modo activo, para
@@ -9179,6 +9455,7 @@ elements.verificadorFiltrarButton?.addEventListener("click", () => rerenderVerif
     else if (state.verificadorModo === "desfases") cargarVerificadorDesfases();
     else if (state.verificadorModo === "gestores") cargarVerificadorGestores();
     else if (state.verificadorModo === "cierres") cargarVerificadorCierres();
+    else if (state.verificadorModo === "excedidas") cargarVerificadorExcedidas();
     else cargarVerificador();
   });
 });
