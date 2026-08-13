@@ -4012,7 +4012,16 @@ function renderProgramacionBanner() {
     // "Antes" en la entrada y "después" en la salida son lo habitual: no se pintan
     // como falta. Solo se resalta lo que de verdad se sale del comportamiento normal.
     const fuera = excedeUmbralHorario(sentido, dif);
-    if (fuera) {
+    if (fuera && esCambioDeTurno(sentido, dif)) {
+      // Un desfase de horas en la entrada no es impuntualidad: es otro turno.
+      const horasDif = Math.round((Math.abs(dif) / 60) * 10) / 10;
+      clase += " tarde";
+      insignia = `<span class="prog-chip tarde">Cambio de turno</span>`;
+      estado = `Su turno de hoy es el <strong>${turno.turno}</strong> `
+             + `(${escapeHtml(horaRef)}), pero está entrando <strong>${horasDif} h `
+             + `${dif > 0 ? "después" : "antes"}</strong>. Se puede registrar, pero al guardar `
+             + `<strong>hay que explicar por qué entra a esta hora</strong>.`;
+    } else if (fuera) {
       clase += " tarde";
       insignia = `<span class="prog-chip tarde">${Math.abs(dif)} min ${dif > 0 ? "después" : "antes"}</span>`;
       estado = `Está marcando <strong>${Math.abs(dif)} min ${dif > 0 ? "después" : "antes"}</strong> `
@@ -4032,14 +4041,22 @@ function renderProgramacionBanner() {
     estado = "La salida del turno 1 no se compara: la programación no registra la hora de relevo.";
   }
 
-  // Invitacion a corregir solo cuando el desfase se sale de lo habitual.
-  const aviso = (evaluable && excedeUmbralHorario(sentido, dif))
-    ? `<div class="programacion-aviso">
-         <i data-lucide="help-circle"></i>
-         Hay <strong>${Math.abs(dif)} min</strong> de diferencia con lo programado. Si el tipo de
-         marca no corresponde, <strong>corrígelo abajo</strong> antes de registrar.
-       </div>`
-    : "";
+  // Invitacion a corregir solo cuando el desfase se sale de lo habitual. En un cambio
+  // de turno el sentido SI corresponde, asi que invitar a cambiarlo seria un error:
+  // lo que se pide ahi es la explicacion.
+  const aviso = !(evaluable && excedeUmbralHorario(sentido, dif))
+    ? ""
+    : esCambioDeTurno(sentido, dif)
+      ? `<div class="programacion-aviso">
+           <i data-lucide="repeat"></i>
+           Parece un <strong>cambio de turno</strong>. La marca se registra igual; al guardar se
+           pedirá el motivo para que quede escrito quién autorizó el cambio.
+         </div>`
+      : `<div class="programacion-aviso">
+           <i data-lucide="help-circle"></i>
+           Hay <strong>${Math.abs(dif)} min</strong> de diferencia con lo programado. Si el tipo de
+           marca no corresponde, <strong>corrígelo abajo</strong> antes de registrar.
+         </div>`;
 
   banner.className = clase;
   banner.innerHTML = `
@@ -4156,6 +4173,36 @@ function excedeUmbralHorario(sentido, dif) {
 // Aviso si la hora de la marca no concuerda con el horario programado del turno.
 // No bloquea: la operacion cambia y la programacion puede quedar desactualizada,
 // pero deja constancia visible a quien registra para que revise antes de guardar.
+/* --------------------------------------------------------------------------
+   Cambio de turno: el conductor entra a una hora que NO es la suya.
+
+   Caso real (ARRIAGA PEREA VICTOR WILMAN, 13-ago-2026): programado turno 2 de
+   15:45 a 00:45, se presento a las 05:48 -- 597 min antes -- porque cambio el
+   turno con un companero que tenia cita medica. Pasa a diario en la operacion,
+   pero deja una marca que no cuadra con nada y que nadie sabe explicar despues.
+
+   Solo aplica a CONDUCTORES: son los unicos con turno programado contra el cual
+   se pueda decir que la hora "no es la suya".
+   -------------------------------------------------------------------------- */
+
+const MOTIVOS_CAMBIO_TURNO = [
+  "Cambio de turno con un compañero",
+  "Cubriendo el turno de otro conductor",
+  "Cambió el turno por cita médica",
+  "Le pidieron adelantar el turno",
+  "Novedad del conductor programado",
+  "Le pidieron cubrir un turno adicional"
+];
+
+// True si la ENTRADA cae tan lejos de su turno programado que no es su horario.
+// Se usa el mismo margen con el que la app decide el sentido por programacion.
+function esCambioDeTurno(sentido, dif) {
+  if (sentido !== "entrada") return false;
+  if (!state.isDriverCandidate) return false;   // solo conductores
+  if (state.turnoEstado?.cambio_turno) return true;
+  return dif !== null && Math.abs(dif) > SENTIDO_PROG_MAX_MIN;
+}
+
 async function confirmarHorarioProgramado(sentido) {
   const turno = turnoProgramadoActual();
   if (!turno) return true; // sin programacion del dia: no hay contra que comparar
@@ -4176,6 +4223,27 @@ async function confirmarHorarioProgramado(sentido) {
   const clave = `${sentido}|${horaRef}|${horaMarca}`;
   if (state.programacionAvisoHorario === clave) return true;
   state.programacionAvisoHorario = clave;
+
+  // Un desfase de 10 h no es "llegó tarde": es otro turno. Se pregunta como lo que
+  // es, con los motivos del caso, para no forzar a escribirlo a mano cada vez.
+  const cambio = esCambioDeTurno(sentido, dif);
+  if (cambio) {
+    const horas = Math.round((Math.abs(dif) / 60) * 10) / 10;
+    const motivo = await pedirMotivoDesfase(
+      "Esta entrando en un turno que no es el suyo",
+      `Su turno programado de hoy es el ${turno.turno} (${horaRef}`
+      + `${turno.hora_salida ? ` a ${turno.hora_salida}` : ""}), pero está marcando ENTRADA `
+      + `a las ${horaMarca}: ${horas} h ${dif > 0 ? "después" : "antes"}. `
+      + "Se puede registrar —los cambios de turno son normales—, pero hay que dejar "
+      + "escrito por qué entra a esta hora.",
+      MOTIVOS_CAMBIO_TURNO
+    );
+    if (motivo === null) return false;
+    state.motivoDesfase =
+      `CAMBIO DE TURNO: ENTRADA ${horaMarca} vs su turno ${turno.turno} de las ${horaRef} `
+      + `(${desfase}): ${motivo}`;
+    return true;
+  }
 
   // En vez de un si/no suelto se pide el MOTIVO: asi la novedad queda explicada
   // en la marca (p.ej. "estaba en el taller") y no como un desfase sin razon.
