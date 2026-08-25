@@ -135,6 +135,8 @@ const state = {
   lastEntrada: null,
   openEntrada: null,
   submittingMark: false,
+  submitInFlight: false,
+  photoModalRequestSeq: 0,
   overdueToastDismissed: false,
   overdueToastDismissedIds: [],
   adminSubtab: "alerts",
@@ -365,6 +367,11 @@ const elements = {
   alertTitle: $("#alertTitle"),
   alertText: $("#alertText"),
   alertButton: $("#alertButton"),
+  photoModalOverlay: $("#photoModalOverlay"),
+  photoModalTitle: $("#photoModalTitle"),
+  photoModalStatus: $("#photoModalStatus"),
+  photoModalImage: $("#photoModalImage"),
+  photoModalClose: $("#photoModalClose"),
   registroSuccessOverlay: $("#registroSuccessOverlay"),
   registroSuccessModal: $("#registroSuccessOverlay .registro-success-modal"),
   registroSuccessTitle: $("#registroSuccessTitle"),
@@ -540,6 +547,53 @@ function showAlertModal(title, text) {
 
 function hideAlertModal() {
   elements.alertOverlay.classList.add("hidden");
+}
+
+// Muestra la foto de evidencia de una marca (entrada o salida) en un modal.
+// La foto vive en un bucket privado, asi que se pide una URL firmada cada vez
+// -no se puede simplemente apuntar <img> al path guardado en la base.
+async function showPhotoModal(fotoPath, label) {
+  if (!elements.photoModalOverlay) return;
+  // Cerrojo de secuencia: si el admin hace click en "Ver foto" de otra fila antes
+  // de que esta respuesta llegue, la createSignedUrl de la primera podria resolver
+  // DESPUES de la segunda y pisar la imagen/estado correctos con la foto equivocada.
+  const seq = ++state.photoModalRequestSeq;
+  elements.photoModalTitle.textContent = label || "Foto de la marca";
+  elements.photoModalStatus.textContent = "Cargando foto...";
+  elements.photoModalStatus.classList.remove("hidden");
+  elements.photoModalImage.classList.add("hidden");
+  elements.photoModalImage.removeAttribute("src");
+  elements.photoModalOverlay.classList.remove("hidden");
+
+  if (!fotoPath) {
+    if (seq === state.photoModalRequestSeq) {
+      elements.photoModalStatus.textContent = "Esta marca no tiene foto guardada.";
+    }
+    return;
+  }
+
+  const { data, error } = await supabaseClient.storage
+    .from(config.FOTO_BUCKET)
+    .createSignedUrl(fotoPath, 300);
+
+  if (seq !== state.photoModalRequestSeq) return; // se abrio otra foto mientras tanto
+
+  if (error || !data?.signedUrl) {
+    // La purga automatica borra las fotos pasados unos dias (15 normales / 25
+    // selfies): si ya no existe, este mensaje es lo esperado, no un error real.
+    elements.photoModalStatus.textContent =
+      "No se pudo cargar la foto: puede que ya se haya purgado del almacenamiento.";
+    return;
+  }
+
+  elements.photoModalImage.src = data.signedUrl;
+  elements.photoModalImage.classList.remove("hidden");
+  elements.photoModalStatus.classList.add("hidden");
+}
+
+function hidePhotoModal() {
+  elements.photoModalOverlay?.classList.add("hidden");
+  elements.photoModalImage?.removeAttribute("src");
 }
 
 function showRegistroModal({ titulo, subtitulo = "", ok = true, filas = [] }) {
@@ -5739,9 +5793,15 @@ async function marcaDuplicadaReciente(colaboradorId, sentido, fecha, hora) {
 
 async function submitAttendance(event) {
   event.preventDefault();
-  if (state.submittingMark) {
+  // Cerrojo sincrono contra doble click/Enter: sin esto, un segundo click mientras
+  // el primero todavia esta validando (por ejemplo esperando el dialogo de cierre
+  // de un turno anterior) dispara esta funcion dos veces en paralelo y puede
+  // duplicar RPCs como cerrar_turno_automatico o abrir el dialogo de cierre dos veces.
+  if (state.submittingMark || state.submitInFlight) {
     return;
   }
+  state.submitInFlight = true;
+  try {
   if (!requireOnline()) return;
   setMessage(elements.formMessage, "");
   clearBukResult();
@@ -5783,13 +5843,20 @@ async function submitAttendance(event) {
 
   // Turno anterior sin cerrar: se corta aqui, antes de pedir foto y ubicacion, para
   // no hacerle recorrer todo el proceso a quien igual no va a poder registrar.
+  //
+  // Este bloque SOLO cierra el turno que se esta mostrando. Antes, si el cierre
+  // quedaba bien, el codigo seguia de una vez con el resto de la funcion y
+  // terminaba registrando la ENTRADA de hoy en el mismo click -el mensaje de exito
+  // dice "Ahora registra la ENTRADA de hoy" pero en la practica ya la registraba
+  // solo. Por eso ahora se retorna siempre: cerrado o no, hay que volver a darle a
+  // "Registrar" para la entrada.
   if (state.nextSentido === "entrada" && state.openEntrada && state.cierrePendiente) {
     const cerrado = await ofrecerCierreTurnoAnterior(state.sentidoSegunProgramacion);
     if (!cerrado) {
       renderProgramacionBanner();
       elements.programacionBanner?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
     }
+    return;
   }
 
   if (!state.faceValidated || !state.compressedFile) {
@@ -6260,6 +6327,12 @@ async function submitAttendance(event) {
       elements.submitButton.classList.add("attention");
     }
   }
+  } finally {
+    // Cierra el cerrojo sincrono del inicio de la funcion, sin importar por cual
+    // de los tantos "return" tempranos se haya salido (turno pendiente, falta foto,
+    // falta ubicacion, etc.): asi el siguiente click SIEMPRE puede volver a intentar.
+    state.submitInFlight = false;
+  }
 }
 
 async function ensureLocalCollaborator(csvCollaborator) {
@@ -6342,7 +6415,7 @@ async function loadTodayHistory() {
   const to = from + state.historyPageSize - 1;
   let query = supabaseClient
     .from("asistencias")
-    .select(dni ? "id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,latitud,longitud,colaboradores!inner(dni,nombre)" : "id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,latitud,longitud,colaboradores(dni,nombre)")
+    .select(dni ? "id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,latitud,longitud,foto_path,colaboradores!inner(dni,nombre)" : "id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,latitud,longitud,foto_path,colaboradores(dni,nombre)")
     .order("fecha", { ascending: false })
     .order("hora", { ascending: false })
     .range(from, to);
@@ -6396,12 +6469,15 @@ function historyItemsHtml(rows) {
     const tieneCoords = item.latitud != null && item.longitud != null;
     const lat = tieneCoords ? Number(item.latitud).toFixed(6) : "";
     const lon = tieneCoords ? Number(item.longitud).toFixed(6) : "";
+    const nombreItem = item.colaboradores?.nombre || "Sin nombre";
+    const fotoPath = item.foto_path || "";
+    const labelFoto = `${nombreItem} · ${String(item.sentido).toUpperCase()} · ${item.fecha} ${String(item.hora).slice(0, 5)}`;
     return `
     <article class="history-item">
       <div class="history-time">${escapeHtml(String(item.hora).slice(0, 5))}</div>
       <div class="history-main">
         <strong>
-          ${escapeHtml(item.colaboradores?.nombre || "Sin nombre")}
+          ${escapeHtml(nombreItem)}
           <span class="pill ${escapeHtml(item.sentido)}">${escapeHtml(item.sentido)}</span>
         </strong>
         <div class="history-meta">
@@ -6410,6 +6486,9 @@ function historyItemsHtml(rows) {
           ${mostrarOrigen ? `<span>${escapeHtml(origen)}</span>` : ""}
           <span>Buk ${item.enviado_buk ? "OK" : escapeHtml(item.buk_status || "pendiente")}</span>
           ${tieneCoords ? `<a class="history-geo" href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" rel="noopener">📍 ${lat}, ${lon}</a>` : ""}
+          ${fotoPath
+            ? `<button type="button" class="history-geo history-photo-btn" data-foto="${escapeHtml(fotoPath)}" data-label="${escapeHtml(labelFoto)}">📷 Ver foto</button>`
+            : `<span>Sin foto</span>`}
         </div>
       </div>
     </article>
@@ -6426,7 +6505,7 @@ async function loadRecentHistory() {
 
   let query = supabaseClient
     .from("asistencias")
-    .select("id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,latitud,longitud,colaboradores(dni,nombre)")
+    .select("id,fecha,hora,sentido,origen,observacion,enviado_buk,buk_status,latitud,longitud,foto_path,colaboradores(dni,nombre)")
     .order("fecha", { ascending: false })
     .order("hora", { ascending: false })
     .limit(20);
@@ -9920,6 +9999,12 @@ elements.historyNextPageButton.addEventListener("click", () => {
   state.historyPage += 1;
   refreshCurrentHistory("keep-page");
 });
+elements.historyList.addEventListener("click", (event) => {
+  const btn = event.target.closest(".history-photo-btn");
+  if (!btn) return;
+  showPhotoModal(btn.dataset.foto, btn.dataset.label);
+});
+elements.photoModalClose?.addEventListener("click", hidePhotoModal);
 elements.alertButton.addEventListener("click", async () => {
   hideAlertModal();
   const registerVisible = !elements.registerPanel.classList.contains("hidden");

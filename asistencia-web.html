@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20260813a-cambio-de-turno">
+  <link rel="stylesheet" href="./asistencia.css?v=20260825c-fix-race-modal-foto">
 </head>
 <body>
   <main class="shell">
@@ -1483,6 +1483,15 @@
       </div>
     </section>
 
+    <section id="photoModalOverlay" class="process-overlay hidden" aria-live="polite" aria-modal="true" role="dialog">
+      <div class="process-modal photo-modal">
+        <strong id="photoModalTitle">Foto de la marca</strong>
+        <p id="photoModalStatus">Cargando foto...</p>
+        <img id="photoModalImage" class="photo-modal-image hidden" alt="Foto de evidencia de la marca">
+        <button id="photoModalClose" class="secondary wide" type="button">Cerrar</button>
+      </div>
+    </section>
+
     <section id="registroSuccessOverlay" class="process-overlay hidden" aria-live="polite" aria-modal="true" role="dialog">
       <div class="process-modal registro-success-modal">
         <div id="registroSuccessIcon" class="registro-success-icon" aria-hidden="true">
@@ -1633,7 +1642,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20260813a-cambio-de-turno"></script>
+  <script src="./asistencia.js?v=20260825c-fix-race-modal-foto"></script>
 </body>
 </html>
 

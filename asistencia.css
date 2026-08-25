@@ -1964,6 +1964,29 @@ select.invalid:focus {
   gap: 14px;
 }
 
+.photo-modal {
+  width: min(480px, 100%);
+}
+
+.photo-modal-image {
+  width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  border-radius: var(--radius-lg);
+  background: #eee;
+}
+
+.history-photo-btn {
+  border: 1px solid #bfe3cc;
+  background: #eaf6ee;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.history-photo-btn:hover {
+  filter: brightness(0.97);
+}
+
 .location-required {
   color: #b3261e;
   font-weight: 800;
