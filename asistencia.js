@@ -137,10 +137,17 @@ const state = {
   submittingMark: false,
   submitInFlight: false,
   photoModalRequestSeq: 0,
+  identidadConfirmada: false,
+  avisarAdminSentido: false,
+  perfilSocioLoaded: false,
+  perfilSocioRows: [],
   overdueToastDismissed: false,
   overdueToastDismissedIds: [],
   adminSubtab: "alerts",
   openTurns: [],
+  overdueDriversCount: 0,
+  sentidoRevisionRows: [],
+  sentidoRevisionCount: 0,
   selectedSonarDriverId: null,
   cameraStream: null,
   cameraOpenedAt: 0,
@@ -223,6 +230,7 @@ const elements = {
   dniInput: $("#dniInput"),
   searchButton: $("#searchButton"),
   collaboratorBox: $("#collaboratorBox"),
+  driverGreetingCard: $("#driverGreetingCard"),
   turnoStatusBanner: $("#turnoStatusBanner"),
   reportDateInput: $("#reportDateInput"),
   reportTimeInput: $("#reportTimeInput"),
@@ -244,6 +252,7 @@ const elements = {
   stepDni: $("#stepDni"),
   stepPhoto: $("#stepPhoto"),
   stepRegister: $("#stepRegister"),
+  stepGuideText: $("#stepGuideText"),
   observacionInput: $("#observacionInput"),
   motivoOverlay: $("#motivoOverlay"),
   motivoTitle: $("#motivoTitle"),
@@ -392,6 +401,8 @@ const elements = {
   overdueTurnsStatus: $("#overdueTurnsStatus"),
   overdueTurnsBody: $("#overdueTurnsBody"),
   overdueTurnsExportButton: $("#overdueTurnsExportButton"),
+  sentidoRevisionStatus: $("#sentidoRevisionStatus"),
+  sentidoRevisionBody: $("#sentidoRevisionBody"),
   refreshButton: $("#refreshButton"),
   historyDniInput: $("#historyDniInput"),
   historyStartDateInput: $("#historyStartDateInput"),
@@ -410,6 +421,14 @@ const elements = {
   csvSearchInput: $("#csvSearchInput"),
   reloadCsvButton: $("#reloadCsvButton"),
   csvTableBody: $("#csvTableBody"),
+  perfilSocioStatus: $("#perfilSocioStatus"),
+  perfilSocioSearchInput: $("#perfilSocioSearchInput"),
+  reloadPerfilSocioButton: $("#reloadPerfilSocioButton"),
+  perfilSocioBody: $("#perfilSocioBody"),
+  perfilSocioMessage: $("#perfilSocioMessage"),
+  perfilSocioDetailOverlay: $("#perfilSocioDetailOverlay"),
+  perfilSocioDetailBody: $("#perfilSocioDetailBody"),
+  perfilSocioDetailClose: $("#perfilSocioDetailClose"),
   manualExitForm: $("#manualExitForm"),
   manualDniInput: $("#manualDniInput"),
   manualDateInput: $("#manualDateInput"),
@@ -644,11 +663,21 @@ function showBukResult(value) {
   elements.bukResultBox.classList.remove("hidden");
 }
 
+const STEP_GUIDE_TEXT = {
+  dni: "Escribe tu numero de cedula y presiona Validar.",
+  photo: "Verifica que ese sea tu nombre y mira a la camara para tomar tu foto.",
+  register: "Revisa tus datos y presiona Registrar asistencia para terminar.",
+};
+
 function setWorkflowState(stage) {
   state.workflowStage = stage;
   [elements.stepDni, elements.stepPhoto, elements.stepRegister].forEach((step) => {
     step.classList.remove("active", "done");
   });
+
+  if (elements.stepGuideText) {
+    elements.stepGuideText.textContent = STEP_GUIDE_TEXT[stage] || "";
+  }
 
   if (stage === "dni") {
     elements.stepDni.classList.add("active");
@@ -754,6 +783,7 @@ function resetCaptureState(clearHistory = true) {
   if (elements.locationStatus) elements.locationStatus.textContent = "Pendiente por validar coordenadas.";
   setNextActionNotice("");
   setWorkflowState("dni");
+  hideDriverGreetingCard();
   renderTurnoStatusBanner();
   clearBukResult();
   if (clearHistory) clearHistoryPanel();
@@ -784,7 +814,9 @@ function updateConnectionStatus() {
   } else {
     if (elements.searchButton) elements.searchButton.disabled = false;
     if (elements.manualExitButton) elements.manualExitButton.disabled = false;
-    setWorkflowState(state.faceValidated ? "register" : (state.csvCandidate ? "photo" : "dni"));
+    setWorkflowState(state.faceValidated
+      ? "register"
+      : (state.csvCandidate && state.identidadConfirmada ? "photo" : "dni"));
   }
 }
 
@@ -1045,12 +1077,21 @@ async function loadProfile() {
 
   if (state.isAdmin) {
     loadOpenTurns().catch(() => {});
+    loadSentidoRevisionMarks().catch(() => {});
   } else {
-    updateOverdueBadge(0);
+    state.overdueDriversCount = 0;
+    state.sentidoRevisionCount = 0;
+    updateAlertsBadge(0);
   }
 }
 
-function updateOverdueBadge(count) {
+// El badge de la pestaña Alertas suma turnos vencidos + marcas con sentido a
+// revisar: son las dos cosas de esa pestaña que necesitan que un admin actue.
+function refreshAlertsBadge() {
+  updateAlertsBadge(state.overdueDriversCount + state.sentidoRevisionCount);
+}
+
+function updateAlertsBadge(count) {
   const label = !count || count <= 0 ? "" : (count > 99 ? "99+" : String(count));
   [elements.adminTabBadge, elements.adminSubtabAlertsBadge].forEach((badge) => {
     if (!badge) return;
@@ -3241,7 +3282,7 @@ function exportarBase3Csv() {
 }
 
 function showAdminSubtab(name) {
-  const valid = ["alerts", "abiertos", "marcas", "jornadas", "rechazos", "inconsistencias", "validacion", "sinmarca", "corregir", "puntualidad", "jornadas-anomalas", "verificador", "horario", "mapa", "colaboradores", "rostros", "sonar"];
+  const valid = ["alerts", "abiertos", "marcas", "jornadas", "rechazos", "inconsistencias", "validacion", "sinmarca", "corregir", "puntualidad", "jornadas-anomalas", "verificador", "horario", "mapa", "colaboradores", "perfilsociodemografico", "rostros", "sonar"];
   const target = valid.includes(name) ? name : "alerts";
   document.querySelectorAll("[data-admin-tab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.adminTab === target);
@@ -3304,6 +3345,10 @@ function showAdminSubtab(name) {
 
   if (target === "colaboradores" && !state.csvLoaded) {
     loadCollaboratorsCsv();
+  }
+
+  if (target === "perfilsociodemografico" && !state.perfilSocioLoaded) {
+    loadPerfilSociodemografico();
   }
 
   if (target === "validacion") {
@@ -3512,6 +3557,7 @@ function showTab(tabName) {
     loadVehicles();
     loadAdminMarks();
     loadOpenTurns();
+    loadSentidoRevisionMarks();
   }
 
   const isRegister = !isHistory && !isBase3 && !isAdmin && !isManualExit;
@@ -3754,6 +3800,7 @@ function limpiarProgramacion() {
   state.novedadHoy = null;
   state.turnoEstado = null;
   elements.programacionBanner?.classList.add("hidden");
+  hideDriverGreetingCard();
 }
 
 // True si la jornada del turno que corresponde a este momento YA se cumplio
@@ -4937,6 +4984,7 @@ async function buscarColaborador() {
     elements.collaboratorBox.textContent = "Registro rechazado: la cedula no esta activa en la base de colaboradores.";
     setMessage(elements.formMessage, "Cedula no autorizada para registrar asistencia.", "error");
     configureDriverFields(null);
+    hideDriverGreetingCard();
     stopCamera();
     return;
   }
@@ -4998,18 +5046,13 @@ async function buscarColaborador() {
     <div>Proxima marca permitida: ${escapeHtml(state.nextSentido)}</div>
     ${openInfo ? `<div>${escapeHtml(openInfo)}</div>` : ""}
   `;
-  setWorkflowState("photo");
   renderTurnoStatusBanner();
   elements.locationSection?.classList.remove("hidden");
   captureCurrentLocation();
-  setMessage(elements.formMessage, state.isDriverCandidate
-    ? "Cedula activa. Ubica el rostro dentro del recuadro para la validacion biometrica."
-    : "Cedula activa. Toma la foto de evidencia para continuar.", "success");
 
   if (openInfo && state.nextSentido === "salida") {
     // Turno abierto que SI corresponde cerrar (el horario no lo contradijo).
     setSentido("salida");
-    setMessage(elements.formMessage, "Este colaborador tiene un turno abierto. Toma la foto y registra su SALIDA biometrica para cerrarlo.", "success");
   } else if (state.nextSentido === "entrada" && state.lastAttendance?.sentido === "salida") {
     const last = state.lastAttendance;
     const today = getTodayParts().date;
@@ -5024,7 +5067,8 @@ async function buscarColaborador() {
     }
   }
 
-  await startCamera();
+  // La camara no se abre sola: primero hay que confirmar identidad y sentido.
+  mostrarConfirmacionIdentidad();
 }
 
 function diffDaysBetween(fromDate, toDate) {
@@ -5791,6 +5835,37 @@ async function marcaDuplicadaReciente(colaboradorId, sentido, fecha, hora) {
   return null;
 }
 
+const MIN_MINUTOS_ENTRE_ENTRADA_Y_SALIDA = 60;
+
+// Evita cerrar (SALIDA) demasiado pronto despues de la ENTRADA que se va a cerrar
+// (toque accidental o confusion de sentido). Se revalida contra la base -no contra
+// state.openEntrada- por si cambio despues de validar la cedula.
+async function salidaMuyRecienteTrasEntrada(colaboradorId, fecha, hora) {
+  if (!colaboradorId) return null;
+  const { data, error } = await supabaseClient
+    .from("asistencias")
+    .select("id,fecha,hora,sentido")
+    .eq("colaborador_id", colaboradorId)
+    .eq("sentido", "entrada")
+    .order("fecha", { ascending: false })
+    .order("hora", { ascending: false })
+    .limit(1);
+
+  if (error || !data?.length) return null;
+
+  const entrada = data[0];
+  const horaAct = String(hora).length === 5 ? `${hora}:00` : String(hora).slice(0, 8);
+  const tsEntrada = new Date(`${entrada.fecha}T${String(entrada.hora).slice(0, 8)}`).getTime();
+  const tsActual = new Date(`${fecha}T${horaAct}`).getTime();
+  if (Number.isNaN(tsEntrada) || Number.isNaN(tsActual)) return null;
+
+  const diffMin = (tsActual - tsEntrada) / 60000;
+  if (diffMin >= 0 && diffMin < MIN_MINUTOS_ENTRE_ENTRADA_Y_SALIDA) {
+    return { ...entrada, diffMin: Math.round(diffMin) };
+  }
+  return null;
+}
+
 async function submitAttendance(event) {
   event.preventDefault();
   // Cerrojo sincrono contra doble click/Enter: sin esto, un segundo click mientras
@@ -5996,6 +6071,22 @@ async function submitAttendance(event) {
       throw new Error(`No se registro: ya existe una ${sentido} hace ${duplicada.diffMin} min (evitando marca doble).`);
     }
 
+    // Anti-error: no dejar registrar la SALIDA antes de que pase un tiempo minimo
+    // desde la ENTRADA que va a cerrar (toque accidental o confusion del sentido).
+    if (sentido === "salida") {
+      const entradaReciente = await salidaMuyRecienteTrasEntrada(state.colaborador.id, now.date, now.time);
+      if (entradaReciente) {
+        hideProcess();
+        setNextActionNotice("");
+        showAlertModal(
+          "Ya tienes tu entrada registrada",
+          `Tu ENTRADA quedó registrada hace ${entradaReciente.diffMin} minuto(s) (${entradaReciente.fecha} ${String(entradaReciente.hora).slice(0, 5)}). `
+          + `Debes esperar al menos ${MIN_MINUTOS_ENTRE_ENTRADA_Y_SALIDA} minutos antes de registrar la SALIDA.`
+        );
+        throw new Error(`No se registro: la entrada fue hace ${entradaReciente.diffMin} min (menos de ${MIN_MINUTOS_ENTRE_ENTRADA_Y_SALIDA} min).`);
+      }
+    }
+
     showProcess("Validando con Buk/Ctrlit", "Verificando que Buk acepte la marca antes de guardar...");
 
     let entradaParaCierre = null;
@@ -6034,9 +6125,7 @@ async function submitAttendance(event) {
     };
 
     console.log("[BUK] enviando salida (intento 1)", payloadSalida);
-    let { data: bukData, error: bukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-      body: payloadSalida
-    });
+    let { data: bukData, error: bukError } = await invocarBukConReintento(payloadSalida);
     console.log("[BUK] respuesta salida (intento 1)", { data: bukData, error: bukError });
     trazaBuk.push({ paso: "salida_intento_1", payload: payloadSalida, respuesta: bukData ?? null, transportError: bukError?.message ?? null });
 
@@ -6073,9 +6162,7 @@ async function submitAttendance(event) {
         sentido: "entrada"
       };
       console.log("[BUK] reenviando entrada", payloadEntrada);
-      const { data: entradaBuk, error: entradaBukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-        body: payloadEntrada
-      });
+      const { data: entradaBuk, error: entradaBukError } = await invocarBukConReintento(payloadEntrada);
       console.log("[BUK] respuesta entrada", { data: entradaBuk, error: entradaBukError });
       trazaBuk.push({ paso: "reenvio_entrada", payload: payloadEntrada, respuesta: entradaBuk ?? null, transportError: entradaBukError?.message ?? null });
 
@@ -6083,9 +6170,7 @@ async function submitAttendance(event) {
         showProcess("Reintentando salida en Buk", "Entrada aceptada. Enviando la salida nuevamente...");
 
         console.log("[BUK] enviando salida (intento 2 tras entrada OK)", payloadSalida);
-        const reintento = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-          body: payloadSalida
-        });
+        const reintento = await invocarBukConReintento(payloadSalida);
         console.log("[BUK] respuesta salida (intento 2)", reintento);
         trazaBuk.push({ paso: "salida_intento_2", payload: payloadSalida, respuesta: reintento.data ?? null, transportError: reintento.error?.message ?? null });
         bukData = reintento.data;
@@ -6151,6 +6236,9 @@ async function submitAttendance(event) {
     const motivoJornadaObs = state.motivoJornadaExtendida
       ? `Jornada de ${state.horasJornadaExtendida} h (máx ${LIMITE_HORAS_JORNADA} h): ${state.motivoJornadaExtendida}`
       : "";
+    const sentidoRevisadoObs = state.avisarAdminSentido
+      ? "⚠ El colaborador indicó que el sistema sugirió mal el tipo de marca (ENTRADA/SALIDA): requiere revisión del administrador."
+      : "";
     const payload = {
       colaborador_id: state.colaborador.id,
       obra_id: state.colaborador.obra_id,
@@ -6168,7 +6256,7 @@ async function submitAttendance(event) {
       ubicacion_precision_m: location.precision || null,
       origen,
       registrado_por: state.user.id,
-      observacion: [state.motivoDesfase, motivoJornadaObs, userObservation, faceObservation, driverObservation, mobileObservation, fotoWarning, bukObservation].filter(Boolean).join(" | ") || null,
+      observacion: [sentidoRevisadoObs, state.motivoDesfase, motivoJornadaObs, userObservation, faceObservation, driverObservation, mobileObservation, fotoWarning, bukObservation].filter(Boolean).join(" | ") || null,
       celular_comprobante: normalizarCelularCo(elements.celularComprobanteInput?.value)
         || elements.celularComprobanteInput?.value.trim() || null,
       enviado_buk: bukOk,
@@ -6390,6 +6478,8 @@ function resetAttendanceForm(preserveBukResult = false) {
   elements.collaboratorBox.className = "result-box muted";
   elements.collaboratorBox.textContent = "Digita una cedula para validar si esta activa.";
   elements.previewBox.classList.add("hidden");
+  hideDriverGreetingCard();
+  state.avisarAdminSentido = false;
   setWorkflowState("dni");
   stopCamera();
   if (!preserveBukResult) clearBukResult();
@@ -6623,6 +6713,156 @@ function getOpenAttendanceInfo() {
   return `Entrada abierta desde ${last.fecha} ${String(last.hora).slice(0, 5)}. Debe registrar salida.`;
 }
 
+function hideDriverGreetingCard() {
+  state.identidadConfirmada = false;
+  if (!elements.driverGreetingCard) return;
+  elements.driverGreetingCard.classList.add("hidden");
+  elements.driverGreetingCard.innerHTML = "";
+}
+
+// Tarjeta grande con el nombre (para que el conductor confirme que es el) y el
+// sentido (ENTRADA/SALIDA) que va a registrar. Mientras no se confirme, actua
+// como una barrera: no se habilita la camara ni los controles de marca (ver
+// mostrarConfirmacionIdentidad / confirmarIdentidadYContinuar).
+function renderDriverGreetingCard() {
+  if (!elements.driverGreetingCard) return;
+  const nombre = state.csvCandidate?.nombre || state.colaborador?.nombre || "";
+  if (!nombre) {
+    hideDriverGreetingCard();
+    return;
+  }
+
+  const iniciales = nombre
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((parte) => parte[0])
+    .join("")
+    .toUpperCase();
+  const dni = normalizeDni(elements.dniInput.value);
+  const sentido = state.nextSentido === "salida" ? "salida" : "entrada";
+  const confirmado = state.identidadConfirmada;
+
+  elements.driverGreetingCard.className =
+    `driver-greeting-card sentido-${sentido} ${confirmado ? "confirmado" : "pendiente"}`;
+
+  let cuerpo;
+  if (confirmado) {
+    cuerpo = `
+      <div class="driver-greeting-confirmed">
+        <i data-lucide="check-circle-2"></i>
+        <span>Confirmaste tu identidad. Continúa con la foto.</span>
+      </div>
+    `;
+  } else {
+    cuerpo = `
+      <p class="driver-greeting-question">
+        Verifica el nombre y el tipo de marca antes de continuar.
+      </p>
+      <div class="driver-greeting-actions">
+        <button id="confirmIdentityYesButton" class="primary wide" type="button">
+          <i data-lucide="check-circle-2"></i>
+          Sí, soy yo · registrar mi ${sentido.toUpperCase()}
+        </button>
+        <button id="confirmIdentityNoButton" class="secondary wide" type="button">
+          <i data-lucide="x-circle"></i>
+          No soy yo
+        </button>
+      </div>
+    `;
+  }
+
+  elements.driverGreetingCard.innerHTML = `
+    <div class="driver-greeting-top">
+      <div class="driver-avatar" aria-hidden="true">${escapeHtml(iniciales || "?")}</div>
+      <div class="driver-greeting-body">
+        <span class="driver-greeting-hello">${confirmado ? "Identidad confirmada" : "¿Eres tú?"}</span>
+        <strong class="driver-greeting-name">${escapeHtml(nombre)}</strong>
+        ${dni ? `<span class="driver-greeting-dni">Cédula ${escapeHtml(dni)}</span>` : ""}
+      </div>
+      <div class="sentido-big-badge">
+        <i data-lucide="${sentido === "salida" ? "log-out" : "log-in"}"></i>
+        <span>${confirmado ? "Registrando tu" : "Vas a registrar tu"} ${sentido.toUpperCase()}</span>
+      </div>
+    </div>
+    ${cuerpo}
+  `;
+  elements.driverGreetingCard.classList.remove("hidden");
+  if (window.lucide?.createIcons) window.lucide.createIcons();
+
+  if (!confirmado) {
+    $("#confirmIdentityYesButton")?.addEventListener("click", confirmarIdentidadYContinuar);
+    $("#confirmIdentityNoButton")?.addEventListener("click", rechazarIdentidad);
+  }
+}
+
+// Muestra la tarjeta de confirmacion pendiente justo despues de validar la
+// cedula. La camara y los controles de marca quedan bloqueados (workflowStage
+// sigue en "dni") hasta que el conductor confirme que es el y el sentido.
+function mostrarConfirmacionIdentidad() {
+  state.identidadConfirmada = false;
+  renderDriverGreetingCard();
+  if (elements.stepGuideText) {
+    elements.stepGuideText.textContent = "Confirma que eres tú y el tipo de marca para continuar.";
+  }
+  setMessage(elements.formMessage, "Confirma tu identidad y el tipo de marca para continuar.", "success");
+}
+
+async function confirmarIdentidadYContinuar() {
+  // Segunda confirmacion, aparte de "soy yo": el tipo de marca (ENTRADA/SALIDA) es
+  // justo lo que mas se presta a error/toque accidental, asi que pide un tap extra
+  // y explicito antes de abrir la camara.
+  const sentido = state.nextSentido === "salida" ? "salida" : "entrada";
+  const confirmaSentido = await confirmGraphical(
+    "Confirma el tipo de marca",
+    `Vas a registrar tu ${sentido.toUpperCase()}. ¿Es correcto?`,
+    `Sí, es mi ${sentido.toUpperCase()}`,
+    "No, revisar"
+  );
+  if (!confirmaSentido) {
+    avisarAdminSentidoIncorrecto();
+    return;
+  }
+
+  state.identidadConfirmada = true;
+  renderDriverGreetingCard();
+  setWorkflowState("photo");
+  setMessage(elements.formMessage, state.isDriverCandidate
+    ? "Identidad confirmada. Ubica el rostro dentro del recuadro para la validación biométrica."
+    : "Identidad confirmada. Toma la foto de evidencia para continuar.", "success");
+  await startCamera();
+}
+
+// El conductor indica que el nombre mostrado no es el suyo: se corta el flujo
+// en vez de dejarlo seguir con la identidad de otra persona.
+function rechazarIdentidad() {
+  showAlertModal(
+    "Verifica la cédula",
+    "Si el nombre no corresponde contigo, revisa el número de cédula digitado o avisa al administrador. No continues con el registro de otra persona."
+  );
+  resetAttendanceForm();
+  elements.dniInput.value = "";
+  elements.dniInput.focus();
+}
+
+// Cuando el sentido sugerido no es el correcto no se le ofrece al conductor un
+// atajo para forzarlo el mismo (ENTRADA con un turno abierto queda bloqueado en
+// submitAttendance, y SALIDA sin turno abierto tambien; el "opuesto" al sugerido
+// siempre es un callejon sin salida). En vez de eso se manda directo al selector
+// manual (Entrada/Salida) de mas abajo, que ya tiene sus propios resguardos
+// (turno sin cerrar, confirmacion, etc.), y la marca queda con nota para revisión:
+// no se le da al conductor control sobre las horas, esas las valida un administrador.
+function avisarAdminSentidoIncorrecto() {
+  state.avisarAdminSentido = true;
+  renderDriverGreetingCard();
+  showAlertModal(
+    "Quedará marcada para revisión",
+    "Usa los botones ENTRADA/SALIDA de más abajo para elegir el que sepas que es correcto y continúa normalmente. "
+    + "Tu marca se guardará con una nota para que el administrador la revise."
+  );
+  elements.markControls?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 function renderSentidoSelector() {
   if (!elements.sentidoEntradaButton || !elements.sentidoSalidaButton) return;
   elements.sentidoEntradaButton.classList.toggle("active", state.nextSentido === "entrada");
@@ -6635,6 +6875,8 @@ function renderSentidoSelector() {
   elements.sentidoSalidaButton.disabled = false;
   elements.sentidoEntradaButton.classList.remove("locked");
   elements.sentidoSalidaButton.classList.remove("locked");
+
+  renderDriverGreetingCard();
 
   const suggested = getNextSentidoFromLastAttendance();
   if (!elements.sentidoSuggestion) return;
@@ -6981,7 +7223,8 @@ function getOverdueDriverTurns() {
 function renderOverdueTurns() {
   const rows = getOverdueTurns();
   const drivers = getOverdueDriverTurns();
-  updateOverdueBadge(drivers.length);
+  state.overdueDriversCount = drivers.length;
+  refreshAlertsBadge();
   refreshOverdueDriversToast(drivers);
   if (!rows.length) {
     elements.overdueTurnsStatus.textContent = `Sin turnos abiertos hace mas de ${OVERDUE_HORAS} horas. Excelente.`;
@@ -7010,6 +7253,70 @@ function renderOverdueTurns() {
         <td>${escapeHtml(cargo)}</td>
         <td>${escapeHtml(mark.fecha)} ${escapeHtml(String(mark.hora).slice(0, 5))}</td>
         <td class="${claseTiempo}">${escapeHtml(tiempoLabel)}</td>
+      </tr>
+    `;
+  }).join("");
+  renderIcons();
+}
+
+// Texto que se guarda en la observacion cuando el conductor usa "El sistema se
+// equivocó, avisar al administrador" (ver avisarAdminSentidoIncorrecto). Se
+// busca por un fragmento estable del mensaje, no por el texto completo, para
+// no depender de que nadie mas lo edite despues.
+const SENTIDO_REVISION_MARCADOR = "requiere revisión del administrador";
+// La regla (y el flag en la observacion) se estrenaron el 2-sep-2026: nada
+// anterior al 1-sep-2026 pudo haberla usado. Fecha fija, no ventana movil,
+// igual que FECHA_CORTE_VALIDACIONES.
+const SENTIDO_REVISION_DESDE = "2026-09-01";
+
+async function loadSentidoRevisionMarks() {
+  if (!state.isAdmin) return;
+  try {
+    await ensureCsvLoaded();
+    const { data, error } = await supabaseClient
+      .from("asistencias")
+      .select("id,fecha,hora,sentido,observacion,colaboradores(dni,nombre)")
+      .ilike("observacion", `%${SENTIDO_REVISION_MARCADOR}%`)
+      .gte("fecha", SENTIDO_REVISION_DESDE)
+      .order("fecha", { ascending: false })
+      .order("hora", { ascending: false })
+      .limit(200);
+    if (error) throw error;
+    state.sentidoRevisionRows = data || [];
+  } catch (error) {
+    console.warn("No se pudieron cargar las marcas con sentido a revisar:", error?.message || error);
+    state.sentidoRevisionRows = [];
+  }
+  renderSentidoRevisionMarks();
+}
+
+function renderSentidoRevisionMarks() {
+  if (!elements.sentidoRevisionStatus || !elements.sentidoRevisionBody) return;
+  const rows = state.sentidoRevisionRows || [];
+  state.sentidoRevisionCount = rows.length;
+  refreshAlertsBadge();
+
+  if (!rows.length) {
+    elements.sentidoRevisionStatus.textContent =
+      `Sin marcas con sentido a revisar desde el ${SENTIDO_REVISION_DESDE}.`;
+    elements.sentidoRevisionBody.innerHTML = "";
+    return;
+  }
+  elements.sentidoRevisionStatus.textContent =
+    `${rows.length} marca(s) donde el conductor indicó que el sentido sugerido era incorrecto.`;
+
+  elements.sentidoRevisionBody.innerHTML = rows.map((mark) => {
+    const dni = mark.colaboradores?.dni || "";
+    const nombre = mark.colaboradores?.nombre || getDisplayNameForDni(dni) || "Sin nombre";
+    const cargo = getCargoForDni(dni) || "Sin cargo";
+    return `
+      <tr data-mark-id="${escapeHtml(mark.id)}" data-dni="${escapeHtml(dni)}">
+        <td>${escapeHtml(dni)}</td>
+        <td>${escapeHtml(nombre)}</td>
+        <td>${escapeHtml(cargo)}</td>
+        <td>${escapeHtml(mark.fecha)}</td>
+        <td>${escapeHtml(String(mark.hora).slice(0, 5))}</td>
+        <td><span class="pill ${escapeHtml(mark.sentido)}">${escapeHtml(mark.sentido)}</span></td>
       </tr>
     `;
   }).join("");
@@ -7441,6 +7748,24 @@ async function marcarEstadoBukEnAsistencia(asistenciaId, bukOk, bukData, bukErro
   }
 }
 
+// Reintenta la llamada a la funcion Edge de Buk cuando la falla es de RED/transporte
+// (p.ej. "Failed to send a request to the Edge Function": el fetch ni siquiera llego
+// a responder), no cuando Buk SI respondio y rechazo la marca por una regla de
+// negocio (esas no se arreglan reintentando, se reintenta exactamente el mismo error).
+async function invocarBukConReintento(payload, maxIntentos = 3) {
+  let intento = 0;
+  let resultado = { data: null, error: null };
+  while (intento < maxIntentos) {
+    intento += 1;
+    resultado = await supabaseClient.functions.invoke("enviar-asistencia-buk", { body: payload });
+    if (resultado.data) return resultado;
+    if (intento < maxIntentos) {
+      await new Promise((resolve) => setTimeout(resolve, 900 * intento));
+    }
+  }
+  return resultado;
+}
+
 async function lookupObraIdDeColaborador(dni) {
   try {
     const { data, error } = await supabaseClient.functions.invoke("consultar-colaborador-buk", {
@@ -7523,24 +7848,37 @@ function computeJornadaForMark(sentido, fechaMarca, lastEntradaFecha) {
   return fechaMarca;
 }
 
+// Nombre historico ("Csv") de cuando la base de colaboradores activos venia de un
+// Google Sheets publicado. Ahora se lee de employees (activo = true); se dejo el
+// nombre de la funcion y de state.csvRows/csvCandidate para no tocar los ~15
+// lugares del archivo que ya consumen esa forma de datos {cedula,nombre,estado,
+// cargo,empresa,vehiculo,ruta}.
 async function loadCollaboratorsCsv() {
   if (!requireOnline(elements.csvStatus)) return;
   elements.csvStatus.textContent = "Cargando base...";
   elements.csvTableBody.innerHTML = "";
 
-  try {
-    const response = await fetch(config.COLABORADORES_CSV_URL, { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const { data, error } = await supabaseClient
+    .from("employees")
+    .select("cedula,nombre,cargo,vehiculo_asociado,ruta")
+    .eq("activo", true);
 
-    const csvText = await response.text();
-    state.csvRows = parseCsv(csvText)
-      .map(normalizeCsvRow)
-      .filter((row) => normalizeCsvHeader(row.estado) === "ACTIVO");
-    state.csvLoaded = true;
-    renderCsvTable();
-  } catch (error) {
-    elements.csvStatus.textContent = `No se pudo cargar el CSV: ${error.message}`;
+  if (error) {
+    elements.csvStatus.textContent = `No se pudo cargar la base de colaboradores: ${error.message}`;
+    return;
   }
+
+  state.csvRows = (data || []).map((row) => ({
+    cedula: normalizeCsvText(row.cedula).replace(/[^\dA-Za-z]/g, ""),
+    nombre: normalizeCsvText(row.nombre),
+    estado: "ACTIVO",
+    cargo: normalizeCsvText(row.cargo),
+    empresa: "",
+    vehiculo: normalizeCsvText(row.vehiculo_asociado),
+    ruta: normalizeCsvText(row.ruta)
+  }));
+  state.csvLoaded = true;
+  renderCsvTable();
 }
 
 function parseCsv(text) {
@@ -7660,6 +7998,266 @@ function useCsvDni(dni) {
   elements.dniInput.value = dni;
   showTab("register");
   buscarColaborador();
+}
+
+/* ==========================================================================
+   Administracion > Perfil sociodemografico (tablas employees + perfil_sociodemografico)
+   ========================================================================== */
+
+const PERFIL_SOCIO_CAMPOS = [
+  "tipo_identificacion", "fecha_nacimiento", "sexo", "estado_civil", "grado_escolaridad",
+  "composicion_familiar", "estrato_socioeconomico", "lugar_residencia", "barrio",
+  "medio_desplazamiento", "raza", "tipo_sangre", "turno_trabajo", "tipo_vinculacion",
+  "fecha_ingreso", "conduce", "tipo_vehiculo_conduce", "anios_experiencia_conduccion",
+  "personas_a_cargo", "cabeza_familia", "tipo_vivienda", "talla_camisa", "talla_pantalon",
+  "talla_calzado", "eps", "arl", "fondo_pension", "caja_compensacion", "direccion_residencia"
+];
+
+// Se hacen 2 consultas por separado (en vez de un embed de PostgREST) para no
+// depender de que la relacion employees -> perfil_sociodemografico se detecte
+// como "a uno" (con FK unica) y no como arreglo; el cruce se hace aqui por employee_id.
+async function loadPerfilSociodemografico() {
+  if (!state.isAdmin) return;
+  if (!requireOnline(elements.perfilSocioStatus)) return;
+
+  setBusy(elements.reloadPerfilSocioButton, true);
+  elements.perfilSocioStatus.textContent = "Cargando...";
+  setMessage(elements.perfilSocioMessage, "");
+
+  try {
+    const [empRes, perfilRes] = await Promise.all([
+      supabaseClient
+        .from("employees")
+        .select("id,nombre,cedula,cargo,area,activo,numero_interno,vehiculo_asociado,ruta,base,telefono,foto_url,salario,fecha_salida,created_at")
+        .order("nombre", { ascending: true }),
+      supabaseClient.from("perfil_sociodemografico").select("*")
+    ]);
+
+    if (empRes.error) {
+      elements.perfilSocioStatus.textContent = "No se pudo cargar la base de colaboradores.";
+      setMessage(elements.perfilSocioMessage, empRes.error.message || "Error consultando employees.", "error");
+      return;
+    }
+    if (perfilRes.error) {
+      setMessage(elements.perfilSocioMessage, `No se pudo cargar el perfil sociodemografico: ${perfilRes.error.message || ""}`, "error");
+    }
+
+    const perfilPorEmployee = new Map();
+    (perfilRes.data || []).forEach((p) => perfilPorEmployee.set(p.employee_id, p));
+
+    state.perfilSocioRows = (empRes.data || []).map((row) => ({
+      ...row,
+      perfil: perfilPorEmployee.get(row.id) || null
+    }));
+    state.perfilSocioLoaded = true;
+    renderPerfilSocioTable();
+  } finally {
+    setBusy(elements.reloadPerfilSocioButton, false);
+  }
+}
+
+function getFilteredPerfilSocioRows() {
+  const q = (elements.perfilSocioSearchInput?.value || "").trim().toLowerCase();
+  const qDni = normalizeDni(elements.perfilSocioSearchInput?.value || "");
+  return (state.perfilSocioRows || []).filter((row) => {
+    if (!q && !qDni) return true;
+    const matchName = (row.nombre || "").toLowerCase().includes(q);
+    const matchDni = qDni && normalizeDni(row.cedula || "").includes(qDni);
+    return matchName || matchDni;
+  });
+}
+
+function perfilSocioCompletitud(perfil) {
+  if (!perfil) return { llenos: 0, total: PERFIL_SOCIO_CAMPOS.length };
+  const llenos = PERFIL_SOCIO_CAMPOS.filter((campo) => {
+    const v = perfil[campo];
+    return v !== null && v !== undefined && String(v).trim() !== "";
+  }).length;
+  return { llenos, total: PERFIL_SOCIO_CAMPOS.length };
+}
+
+function renderPerfilSocioTable() {
+  const rows = getFilteredPerfilSocioRows();
+  elements.perfilSocioStatus.textContent = state.perfilSocioRows.length
+    ? `${rows.length} de ${state.perfilSocioRows.length} colaborador(es)`
+    : "Sin colaboradores para mostrar.";
+
+  elements.perfilSocioBody.innerHTML = rows.map((row) => {
+    const { llenos, total } = perfilSocioCompletitud(row.perfil);
+    const completo = !!row.perfil && llenos === total;
+    const tagClase = completo ? "badge-complete" : "badge-pending";
+    const tagTexto = !row.perfil ? "Sin perfil" : (completo ? "Completo" : `${llenos}/${total}`);
+    return `
+      <tr>
+        <td>${escapeHtml(row.cedula || "")}</td>
+        <td>${escapeHtml(row.nombre || "")}</td>
+        <td>${escapeHtml(row.cargo || "")}</td>
+        <td class="${row.activo ? "status-active" : ""}">${row.activo ? "Activo" : "Inactivo"}</td>
+        <td><span class="perfil-socio-tag ${tagClase}">${escapeHtml(tagTexto)}</span></td>
+        <td><button class="mini-button" type="button" data-ver-perfil-socio="${escapeHtml(row.id)}">Ver detalle</button></td>
+      </tr>
+    `;
+  }).join("");
+  renderIcons();
+}
+
+function formatearValorPerfil(v) {
+  if (v === null || v === undefined || v === "") return "--";
+  return String(v);
+}
+
+function formatearMonedaCop(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "--";
+  return n.toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
+}
+
+function calcularEdadDesdeFecha(fechaNacimiento) {
+  if (!fechaNacimiento) return "--";
+  const nac = new Date(`${String(fechaNacimiento).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(nac.getTime())) return "--";
+  const hoy = new Date();
+  let edad = hoy.getFullYear() - nac.getFullYear();
+  const m = hoy.getMonth() - nac.getMonth();
+  if (m < 0 || (m === 0 && hoy.getDate() < nac.getDate())) edad -= 1;
+  return `${edad} años`;
+}
+
+function calcularAntiguedadDesdeFecha(fechaIngreso) {
+  if (!fechaIngreso) return "--";
+  const ini = new Date(`${String(fechaIngreso).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(ini.getTime())) return "--";
+  const hoy = new Date();
+  let meses = (hoy.getFullYear() - ini.getFullYear()) * 12 + (hoy.getMonth() - ini.getMonth());
+  if (hoy.getDate() < ini.getDate()) meses -= 1;
+  if (meses < 0) meses = 0;
+  if (meses < 12) return `${meses} mes${meses === 1 ? "" : "es"}`;
+  const anios = Math.floor(meses / 12);
+  const restoMeses = meses % 12;
+  return restoMeses ? `${anios} a ${restoMeses} m` : `${anios} años`;
+}
+
+function seccionPerfilSocioHtml(titulo, campos) {
+  const llenos = campos.filter(([, valor]) => valor !== null && valor !== undefined && String(valor).trim() !== "");
+  const tag = llenos.length === campos.length
+    ? `<span class="perfil-socio-tag badge-complete">Completo</span>`
+    : `<span class="perfil-socio-tag badge-pending">${campos.length - llenos.length} pendiente(s)</span>`;
+  return `
+    <div class="perfil-socio-section">
+      <div class="perfil-socio-section-head">
+        <strong>${escapeHtml(titulo)}</strong>
+        ${tag}
+      </div>
+      <div class="perfil-socio-grid">
+        ${campos.map(([etiqueta, valor]) => `
+          <div class="perfil-socio-field">
+            <span>${escapeHtml(etiqueta)}</span>
+            <strong>${escapeHtml(formatearValorPerfil(valor))}</strong>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function siNoOVacio(v) {
+  if (v === null || v === undefined) return null;
+  return v ? "Si" : "No";
+}
+
+function abrirDetallePerfilSocio(employeeId) {
+  const row = (state.perfilSocioRows || []).find((r) => r.id === employeeId);
+  if (!row || !elements.perfilSocioDetailOverlay) return;
+  const p = row.perfil || {};
+
+  const iniciales = (row.nombre || "")
+    .split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]).join("").toUpperCase();
+
+  elements.perfilSocioDetailBody.innerHTML = `
+    <div class="perfil-socio-header">
+      <div class="perfil-socio-avatar" aria-hidden="true">${escapeHtml(iniciales || "?")}</div>
+      <div class="perfil-socio-header-body">
+        <h3>${escapeHtml(row.nombre || "")}</h3>
+        <p>CC ${escapeHtml(row.cedula || "")} · ${escapeHtml(row.cargo || "Sin cargo")} · ${escapeHtml(row.area || "Sin área")}</p>
+      </div>
+      <div class="perfil-socio-badges">
+        <span class="perfil-socio-tag ${row.activo ? "badge-complete" : "badge-pending"}">${row.activo ? "Activo" : "Inactivo"}</span>
+        <span class="perfil-socio-tag ${row.perfil ? "badge-complete" : "badge-pending"}">${row.perfil ? "Perfil registrado" : "Sin perfil"}</span>
+      </div>
+    </div>
+
+    <div class="perfil-socio-stats">
+      <div class="perfil-socio-stat"><strong>${escapeHtml(formatearValorPerfil(p.fecha_ingreso))}</strong><span>Fecha de ingreso</span></div>
+      <div class="perfil-socio-stat"><strong>${escapeHtml(calcularAntiguedadDesdeFecha(p.fecha_ingreso || row.created_at))}</strong><span>Antigüedad</span></div>
+      <div class="perfil-socio-stat"><strong>${escapeHtml(calcularEdadDesdeFecha(p.fecha_nacimiento))}</strong><span>Edad</span></div>
+      <div class="perfil-socio-stat"><strong>${escapeHtml(formatearMonedaCop(row.salario))}</strong><span>Salario</span></div>
+    </div>
+
+    <div class="perfil-socio-stats">
+      <div class="perfil-socio-stat"><strong>${escapeHtml(formatearValorPerfil(row.numero_interno))}</strong><span>Vehículo interno</span></div>
+      <div class="perfil-socio-stat"><strong>${escapeHtml(formatearValorPerfil(row.ruta))}</strong><span>Ruta</span></div>
+      <div class="perfil-socio-stat"><strong>${escapeHtml(formatearValorPerfil(row.base))}</strong><span>Base</span></div>
+    </div>
+
+    ${seccionPerfilSocioHtml("Datos personales", [
+      ["Tipo de identificación", p.tipo_identificacion],
+      ["Sexo", p.sexo],
+      ["Estado civil", p.estado_civil],
+      ["Grado de escolaridad", p.grado_escolaridad],
+      ["Grupo étnico", p.raza],
+      ["Tipo de sangre", p.tipo_sangre]
+    ])}
+
+    ${seccionPerfilSocioHtml("Composición familiar", [
+      ["Composición familiar", p.composicion_familiar],
+      ["Personas a cargo", p.personas_a_cargo],
+      ["¿Es cabeza de familia?", siNoOVacio(p.cabeza_familia)]
+    ])}
+
+    ${seccionPerfilSocioHtml("Vivienda y ubicación", [
+      ["Estrato socioeconómico", p.estrato_socioeconomico],
+      ["Lugar de residencia", p.lugar_residencia],
+      ["Barrio", p.barrio],
+      ["Dirección", p.direccion_residencia],
+      ["Tipo de vivienda", p.tipo_vivienda],
+      ["Medio de desplazamiento", p.medio_desplazamiento]
+    ])}
+
+    ${seccionPerfilSocioHtml("Salud y seguridad social", [
+      ["EPS", p.eps],
+      ["ARL", p.arl],
+      ["Fondo de pensión", p.fondo_pension],
+      ["Caja de compensación", p.caja_compensacion]
+    ])}
+
+    ${seccionPerfilSocioHtml("Dotación", [
+      ["Talla camisa", p.talla_camisa],
+      ["Talla pantalón", p.talla_pantalon],
+      ["Talla calzado", p.talla_calzado]
+    ])}
+
+    ${seccionPerfilSocioHtml("Conducción y vinculación", [
+      ["¿Conduce?", siNoOVacio(p.conduce)],
+      ["Tipo de vehículo que conduce", p.tipo_vehiculo_conduce],
+      ["Años de experiencia", p.anios_experiencia_conduccion],
+      ["Tipo de vinculación", p.tipo_vinculacion],
+      ["Turno de trabajo", p.turno_trabajo]
+    ])}
+
+    ${p.observaciones ? `
+      <div class="perfil-socio-section">
+        <div class="perfil-socio-section-head"><strong>Observaciones</strong></div>
+        <p style="margin:0;color:var(--muted);">${escapeHtml(p.observaciones)}</p>
+      </div>
+    ` : ""}
+  `;
+
+  elements.perfilSocioDetailOverlay.classList.remove("hidden");
+  renderIcons();
+}
+
+function cerrarDetallePerfilSocio() {
+  elements.perfilSocioDetailOverlay?.classList.add("hidden");
 }
 
 async function loadAdminMarks() {
@@ -9503,16 +10101,14 @@ async function registerManualExit(event) {
     const { obraId: obraIdReal } = await lookupObraIdDeColaborador(colaborador.dni);
     const obraIdAUsar = obraIdReal || BUK_OBRA_ID;
 
-    const { data: bukData, error: bukError } = await supabaseClient.functions.invoke("enviar-asistencia-buk", {
-      body: {
-        asistencia_id: insertedAttendance.id,
-        obra_id: obraIdAUsar,
-        dni_colaborador: colaborador.dni,
-        jornada: jornadaBuk,
-        fecha,
-        hora,
-        sentido: "salida"
-      }
+    const { data: bukData, error: bukError } = await invocarBukConReintento({
+      asistencia_id: insertedAttendance.id,
+      obra_id: obraIdAUsar,
+      dni_colaborador: colaborador.dni,
+      jornada: jornadaBuk,
+      fecha,
+      hora,
+      sentido: "salida"
     });
 
     const bukOk = !bukError && !!bukData?.ok;
@@ -10020,6 +10616,17 @@ elements.openTurnsSearchInput.addEventListener("input", () => renderOpenTurns())
 elements.openTurnsCargoFilter.addEventListener("change", () => renderOpenTurns());
 elements.reloadCsvButton.addEventListener("click", loadCollaboratorsCsv);
 elements.csvSearchInput.addEventListener("input", renderCsvTable);
+elements.reloadPerfilSocioButton?.addEventListener("click", loadPerfilSociodemografico);
+elements.perfilSocioSearchInput?.addEventListener("input", renderPerfilSocioTable);
+elements.perfilSocioBody?.addEventListener("click", (event) => {
+  const btn = event.target.closest("[data-ver-perfil-socio]");
+  if (!btn) return;
+  abrirDetallePerfilSocio(btn.dataset.verPerfilSocio);
+});
+elements.perfilSocioDetailClose?.addEventListener("click", cerrarDetallePerfilSocio);
+elements.perfilSocioDetailOverlay?.addEventListener("click", (event) => {
+  if (event.target === elements.perfilSocioDetailOverlay) cerrarDetallePerfilSocio();
+});
 elements.manualExitForm.addEventListener("submit", registerManualExit);
 elements.manualCodeButton?.addEventListener("click", manualRequestCode);
 elements.manualLocationButton?.addEventListener("click", manualCaptureLocation);

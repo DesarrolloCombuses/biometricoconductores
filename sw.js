@@ -1,4 +1,4 @@
-const APP_VERSION = "20260825c-fix-race-modal-foto";
+const APP_VERSION = "20260902i-corte-fijo-sentido-revision";
 const CACHE_NAME = `combuses-asistencia-${APP_VERSION}`;
 const APP_SHELL = [
   "./asistencia-web.html",

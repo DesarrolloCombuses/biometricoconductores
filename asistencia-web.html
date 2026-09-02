@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20260825c-fix-race-modal-foto">
+  <link rel="stylesheet" href="./asistencia.css?v=20260902i-corte-fijo-sentido-revision">
 </head>
 <body>
   <main class="shell">
@@ -126,6 +126,7 @@
               <strong>Registrar marca</strong>
             </div>
           </div>
+          <p id="stepGuideText" class="step-guide-text" aria-live="polite"></p>
 
           <div class="field-row">
             <label>
@@ -137,6 +138,8 @@
               Validar
             </button>
           </div>
+
+          <div id="driverGreetingCard" class="driver-greeting-card hidden" aria-live="polite"></div>
 
           <div id="collaboratorBox" class="result-box muted">
             Digita una cédula para validar si está activa.
@@ -444,6 +447,10 @@
             <i data-lucide="users"></i>
             Colaboradores
           </button>
+          <button class="admin-subtab" type="button" data-admin-tab="perfilsociodemografico" role="tab">
+            <i data-lucide="id-card"></i>
+            Perfil sociodemográfico
+          </button>
           <button class="admin-subtab" type="button" data-admin-tab="rostros" role="tab">
             <i data-lucide="scan-face"></i>
             Rostros
@@ -480,6 +487,30 @@
                 </tr>
               </thead>
               <tbody id="overdueTurnsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel form-panel" id="sentidoRevisionPanel">
+          <div class="open-turns-head">
+            <div>
+              <h2>Marcas con sentido a revisar</h2>
+              <p id="sentidoRevisionStatus" class="muted">Sin cargar</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Cargo</th>
+                  <th>Fecha</th>
+                  <th>Hora</th>
+                  <th>Sentido registrado</th>
+                </tr>
+              </thead>
+              <tbody id="sentidoRevisionBody"></tbody>
             </table>
           </div>
         </section>
@@ -1340,6 +1371,47 @@
           </div>
         </section>
         </div>
+
+        <div class="admin-subtab-content hidden" data-admin-content="perfilsociodemografico">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Perfil sociodemográfico</h2>
+              <p id="perfilSocioStatus">Sin cargar</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Buscar
+                <input id="perfilSocioSearchInput" type="search" placeholder="Cédula o nombre">
+              </label>
+              <button id="reloadPerfilSocioButton" class="secondary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Actualizar
+              </button>
+            </div>
+          </div>
+          <p class="field-hint">
+            Datos de <strong>employees</strong> y <strong>perfil_sociodemografico</strong>. "Perfil" indica
+            cuántos de los campos sociodemográficos ya están diligenciados para ese colaborador.
+          </p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Cédula</th>
+                  <th>Nombre</th>
+                  <th>Cargo</th>
+                  <th>Estado</th>
+                  <th>Perfil</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="perfilSocioBody"></tbody>
+            </table>
+          </div>
+          <p id="perfilSocioMessage" class="message" role="status"></p>
+        </section>
+        </div>
       </section>
 
       <section id="manualExitPanel" class="hidden">
@@ -1489,6 +1561,15 @@
         <p id="photoModalStatus">Cargando foto...</p>
         <img id="photoModalImage" class="photo-modal-image hidden" alt="Foto de evidencia de la marca">
         <button id="photoModalClose" class="secondary wide" type="button">Cerrar</button>
+      </div>
+    </section>
+
+    <section id="perfilSocioDetailOverlay" class="process-overlay hidden" aria-live="polite" aria-modal="true" role="dialog">
+      <div class="process-modal perfil-socio-modal">
+        <button id="perfilSocioDetailClose" class="icon-button perfil-socio-close" type="button" aria-label="Cerrar">
+          <i data-lucide="x"></i>
+        </button>
+        <div id="perfilSocioDetailBody" class="perfil-socio-body"></div>
       </div>
     </section>
 
@@ -1642,7 +1723,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20260825c-fix-race-modal-foto"></script>
+  <script src="./asistencia.js?v=20260902i-corte-fijo-sentido-revision"></script>
 </body>
 </html>
 
