@@ -6451,12 +6451,26 @@ async function ensureLocalCollaborator(csvCollaborator) {
     .select("id,dni,nombre,empresa,contrato,especialidad,estado,obra_id,foto_referencia_path,rostro_enrolado,rostro_enrolado_at,obras(nombre,obra_id_externo)")
     .single();
 
-  if (createError) {
-    setMessage(elements.formMessage, createError.message || "No se pudo crear el colaborador local.", "error");
+  if (!createError) return created;
+
+  // 23505 = unique_violation en "dni": esto solo pasa si state.colaborador quedo
+  // en null (por ejemplo, un click en Registrar mientras la validacion de la
+  // cedula todavia estaba en curso) pero el colaborador YA existia en la tabla.
+  // No es un error real: se recupera el que ya esta creado en vez de bloquear
+  // el registro con el error crudo de Postgres.
+  if (createError.code === "23505") {
+    const { data: existente, error: fetchError } = await supabaseClient
+      .from("colaboradores")
+      .select("id,dni,nombre,empresa,contrato,especialidad,estado,obra_id,foto_referencia_path,rostro_enrolado,rostro_enrolado_at,obras(nombre,obra_id_externo)")
+      .eq("dni", csvCollaborator.cedula)
+      .maybeSingle();
+    if (existente) return existente;
+    setMessage(elements.formMessage, fetchError?.message || "No se pudo recuperar el colaborador existente.", "error");
     return null;
   }
 
-  return created;
+  setMessage(elements.formMessage, createError.message || "No se pudo crear el colaborador local.", "error");
+  return null;
 }
 
 function addDays(dateString, days) {
