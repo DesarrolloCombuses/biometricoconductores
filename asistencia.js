@@ -7872,10 +7872,12 @@ async function loadCollaboratorsCsv() {
   elements.csvStatus.textContent = "Cargando base...";
   elements.csvTableBody.innerHTML = "";
 
+  // Se usa una funcion (SECURITY DEFINER) en vez de leer "employees" directo:
+  // esa tabla quedo con RLS restringida a los usuarios del modulo Kardex (protege
+  // salario, motivo_renuncia, etc.) y esta app nunca tuvo acceso a esa lista. La
+  // funcion solo expone las columnas que ya se usaban aqui, nada sensible.
   const { data, error } = await supabaseClient
-    .from("employees")
-    .select("cedula,nombre,cargo,vehiculo_asociado,ruta")
-    .eq("activo", true);
+    .rpc("colaboradores_activos_asistencia");
 
   if (error) {
     elements.csvStatus.textContent = `No se pudo cargar la base de colaboradores: ${error.message}`;
@@ -8039,11 +8041,11 @@ async function loadPerfilSociodemografico() {
   setMessage(elements.perfilSocioMessage, "");
 
   try {
+    // "employees" quedo con RLS restringida a los usuarios del modulo Kardex, asi
+    // que esta pestaña (solo para admins de esta app) usa una funcion aparte que
+    // verifica el rol admin de state.isAdmin del lado del servidor.
     const [empRes, perfilRes] = await Promise.all([
-      supabaseClient
-        .from("employees")
-        .select("id,nombre,cedula,cargo,area,activo,numero_interno,vehiculo_asociado,ruta,base,telefono,foto_url,salario,fecha_salida,created_at")
-        .order("nombre", { ascending: true }),
+      supabaseClient.rpc("employees_perfil_sociodemografico_admin"),
       supabaseClient.from("perfil_sociodemografico").select("*")
     ]);
 
