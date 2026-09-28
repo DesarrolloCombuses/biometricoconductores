@@ -4990,6 +4990,9 @@ async function buscarColaborador() {
   }
 
   state.csvCandidate = csvCollaborator;
+  // Sin await: si el navegador muestra el aviso de permiso, la validacion sigue
+  // por detras en vez de quedar colgada hasta que la persona responda.
+  pedirPermisoCamara();
   configureDriverFields(csvCollaborator);
   cargarCelularAgenda(dni);
   if (isDriverCollaborator(csvCollaborator)) {
@@ -5131,8 +5134,75 @@ async function startCamera() {
         }
       });
     }
-  } catch (_error) {
-    setMessage(messageTarget, "No se pudo abrir la camara.", "error");
+  } catch (error) {
+    const { titulo, texto } = explicarErrorCamara(error);
+    setMessage(messageTarget, `${titulo}. ${texto}`, "error");
+    showAlertModal(titulo, texto);
+  }
+}
+
+async function estadoPermisoCamara() {
+  try {
+    if (navigator.permissions?.query) {
+      const status = await navigator.permissions.query({ name: "camera" });
+      return status.state;
+    }
+  } catch (_) { /* Firefox y Safari viejos no reconocen "camera" en la Permissions API */ }
+  return "unknown";
+}
+
+function explicarErrorCamara(error) {
+  const nombre = error?.name || "";
+  if (["NotAllowedError", "PermissionDeniedError", "SecurityError"].includes(nombre)) {
+    return {
+      titulo: "Debes habilitar la cámara",
+      texto: "La cámara está bloqueada para esta página. Toca el candado (o la 'i') junto a la dirección web, entra en Cámara, elige Permitir y recarga la página. La foto es obligatoria para registrar."
+    };
+  }
+  if (["NotFoundError", "DevicesNotFoundError", "OverconstrainedError"].includes(nombre)) {
+    return {
+      titulo: "No se encontró cámara",
+      texto: "Este equipo no tiene una cámara disponible. Conecta una cámara o registra desde un celular."
+    };
+  }
+  if (["NotReadableError", "TrackStartError", "AbortError"].includes(nombre)) {
+    return {
+      titulo: "La cámara está ocupada",
+      texto: "Otra aplicación o pestaña está usando la cámara (una videollamada, otra pestaña de esta app...). Ciérrala y vuelve a intentar."
+    };
+  }
+  return {
+    titulo: "No se pudo abrir la cámara",
+    texto: "Revisa que la cámara esté conectada y con permiso para esta página, y vuelve a intentar."
+  };
+}
+
+// Se llama al validar la cedula para que el navegador pida el permiso de una vez,
+// y no recien despues de confirmar identidad y sentido. Si el permiso ya fue
+// negado, el navegador no vuelve a preguntar: solo queda explicar como habilitarlo.
+async function pedirPermisoCamara() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showAlertModal(
+      "Cámara no disponible",
+      "Este navegador no permite usar la cámara en esta página. Ábrela en Chrome o Safari actualizados."
+    );
+    return false;
+  }
+  const estado = await estadoPermisoCamara();
+  if (estado === "granted") return true;
+  if (estado === "denied") {
+    const { titulo, texto } = explicarErrorCamara({ name: "NotAllowedError" });
+    showAlertModal(titulo, texto);
+    return false;
+  }
+  try {
+    const prueba = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    prueba.getTracks().forEach((track) => track.stop());
+    return true;
+  } catch (error) {
+    const { titulo, texto } = explicarErrorCamara(error);
+    showAlertModal(titulo, texto);
+    return false;
   }
 }
 

@@ -1,4 +1,4 @@
-const APP_VERSION = "20260915b-fix-rls-perfil-socio-kardex";
+const APP_VERSION = "20260928a-permiso-camara-al-validar";
 const CACHE_NAME = `combuses-asistencia-${APP_VERSION}`;
 const APP_SHELL = [
   "./asistencia-web.html",
