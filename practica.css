@@ -242,3 +242,9 @@ svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width:
 .pr-video-estado .pr-barra { margin: 0; }
 .pr-video-estado.aviso { color: #8a5f00; font-weight: 600; }
 .pr-video.visto .pr-video-estado { color: var(--ok); font-weight: 700; }
+.pr-conexion {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 12px;
+  border-radius: 12px; background: #fff4d6; color: #6b4a00; font-size: 15px; font-weight: 600;
+}
+.pr-conexion svg { width: 22px; height: 22px; }
+.pr-conexion.sin-red { background: var(--bad-soft); color: var(--bad); }

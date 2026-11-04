@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
-  <link rel="stylesheet" href="./practica.css?v=20261104f">
+  <link rel="stylesheet" href="./practica.css?v=20261104h">
 </head>
 <body>
   <header class="pr-top">
@@ -44,10 +44,23 @@
         <button class="pr-rol" type="button" role="radio" aria-checked="false" data-rol="servicios">
           <strong>Gestor de servicios y embarque</strong><small>Sin vehículo</small>
         </button>
+        <button class="pr-rol" type="button" role="radio" aria-checked="false" data-rol="lider_servicio">
+          <strong>Líder de servicio</strong><small>Sin vehículo</small>
+        </button>
+        <button class="pr-rol" type="button" role="radio" aria-checked="false" data-rol="lider_operativo">
+          <strong>Líder operativo</strong><small>Sin vehículo</small>
+        </button>
+        <button class="pr-rol" type="button" role="radio" aria-checked="false" data-rol="flota">
+          <strong>Gestión y control de flota</strong><small>Sin vehículo</small>
+        </button>
       </div>
 
       <h2 id="videoTitulo" class="pr-paso"><span>2</span> Mira el video completo</h2>
       <div class="pr-video">
+        <p id="videoConexion" class="pr-conexion" role="status" aria-live="polite">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a15 15 0 0 1 20 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/></svg>
+          <span id="videoConexionTexto">Debes tener conexión a internet para ver el video. Si puedes, usa wifi.</span>
+        </p>
         <video id="videoCapacitacion" controls playsinline preload="metadata"
                controlslist="nodownload noplaybackrate" disablepictureinpicture
                poster="./assets/practica/video-portada.webp" width="720" height="1280">
@@ -153,7 +166,7 @@
     </section>
   </main>
 
-  <script src="./practica-capturas.js?v=20261104f"></script>
-  <script src="./practica.js?v=20261104f"></script>
+  <script src="./practica-capturas.js?v=20261104h"></script>
+  <script src="./practica.js?v=20261104h"></script>
 </body>
 </html>

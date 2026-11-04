@@ -11,11 +11,15 @@
   const TOLERANCIA = 2; // % de margen alrededor del botón al tocar la pantalla
   const ROLES = {
     conductor: { nombre: "Conductor", grupo: "conductor" },
-    movilidad: { nombre: "Gestor de movilidad", grupo: "gestor" },
-    servicios: { nombre: "Gestor de servicios y embarque", grupo: "gestor" }
+    movilidad: { nombre: "Gestor de movilidad", grupo: "sin_programacion" },
+    servicios: { nombre: "Gestor de servicios y embarque", grupo: "sin_programacion" },
+    lider_servicio: { nombre: "Líder de servicio", grupo: "sin_programacion" },
+    lider_operativo: { nombre: "Líder operativo", grupo: "sin_programacion" },
+    flota: { nombre: "Gestión y control de flota", grupo: "sin_programacion" }
   };
 
-  // Banco de preguntas en el orden del flujo de la app. rol: "todos" | "conductor" | "gestor".
+  // Banco de preguntas en el orden del flujo de la app. rol: "todos" | "conductor" | "sin_programacion"
+  // (gestores, líderes y control de flota: sin vehículo y sin turno programado, igual que en la app).
   // tipo "opcion": la primera opción es la correcta (se barajan al mostrar).
   // tipo "toque": captura + zona correcta de practica-capturas.js.
   const PREGUNTAS = [
@@ -74,7 +78,7 @@
     { id: "o-datos-conductor", tipo: "opcion", rol: "conductor", tema: "Solo conductores",
       texto: "¿Qué datos pide la app solo a los conductores?",
       opciones: ["El vehículo (interno o placa) y la base operativa", "La licencia de conducción", "El kilometraje del bus", "La dirección de la casa"],
-      explica: "Los conductores escriben el vehículo del día y la base operativa. Los gestores no." },
+      explica: "Los conductores escriben el vehículo del día y la base operativa. Los demás cargos no." },
     { id: "t-vehiculo", tipo: "toque", rol: "conductor", tema: "Solo conductores",
       texto: "Eres conductor. Toca donde escribes el vehículo de hoy.",
       captura: "vehiculo", zona: "vehiculo", respuesta: "El campo «Vehículo»",
@@ -83,22 +87,22 @@
       texto: "El vehículo y la base ya aparecen llenos. ¿Qué haces?",
       opciones: ["Reviso que sean los de hoy antes de registrar", "Los borro siempre", "No los miro", "Escribo cualquier vehículo"],
       explica: "Si están en tu programación, la app los llena sola. Igual revisa que sean los correctos." },
-    { id: "o-sin-turno", tipo: "opcion", rol: "gestor", tema: "Gestores",
-      texto: "Eres gestor. ¿Por qué la app muestra «Sin turno programado»?",
-      opciones: ["Porque los gestores no tienen programación: la app decide por tu última marca y tú la revisas", "Porque estás de vacaciones", "Porque la app se dañó", "Porque los gestores no marcan"],
+    { id: "o-sin-turno", tipo: "opcion", rol: "sin_programacion", tema: "Sin turno programado",
+      texto: "No eres conductor. ¿Por qué la app te muestra «Sin turno programado»?",
+      opciones: ["Porque tu cargo no tiene programación: la app decide por tu última marca y tú la revisas", "Porque estás de vacaciones", "Porque la app se dañó", "Porque tu cargo no marca"],
       explica: "Sin programación, la app propone ENTRADA o SALIDA según tu última marca. Por eso debes revisarla siempre." },
-    { id: "t-anuncio", tipo: "toque", rol: "gestor", tema: "Gestores",
-      texto: "Eres gestor. ¿Dónde dice qué marca vas a registrar? Tócalo.",
+    { id: "t-anuncio", tipo: "toque", rol: "sin_programacion", tema: "Sin turno programado",
+      texto: "No eres conductor. ¿Dónde dice qué marca vas a registrar? Tócalo.",
       captura: "gestor", zona: "anuncio", respuesta: "El aviso «Va a registrar ENTRADA»",
       explica: "Como no tienes turno programado, sale de tu última marca. Revísalo antes de confirmar." },
-    { id: "o-gestor-vehiculo", tipo: "opcion", rol: "gestor", tema: "Gestores",
-      texto: "Eres gestor. ¿Tienes que escribir vehículo y base?",
+    { id: "o-gestor-vehiculo", tipo: "opcion", rol: "sin_programacion", tema: "Sin turno programado",
+      texto: "No eres conductor. ¿Tienes que escribir vehículo y base?",
       opciones: ["No, eso es solo para conductores", "Sí, siempre", "Solo los lunes", "Solo cuando marcas SALIDA"],
-      explica: "Los gestores hacen los mismos pasos, pero sin vehículo ni base." },
-    { id: "o-gestor-olvido", tipo: "opcion", rol: "gestor", tema: "Gestores",
-      texto: "Eres gestor. Ayer olvidaste marcar la salida y hoy, al llegar, la app te propone SALIDA. ¿Qué haces?",
-      opciones: ["No la marco y le aviso a mi líder", "Marco SALIDA y después ENTRADA", "Marco SALIDA y ya", "No vuelvo a marcar"],
-      explica: "Esa SALIDA quedaría con la hora de hoy y dañaría tu jornada. Tu líder cierra el día anterior con la hora real." },
+      explica: "Si no eres conductor, haces los mismos pasos, pero sin vehículo ni base." },
+    { id: "o-gestor-olvido", tipo: "opcion", rol: "sin_programacion", tema: "Sin turno programado",
+      texto: "No eres conductor. Ayer olvidaste marcar la salida y hoy, al llegar, la app te propone SALIDA. ¿Qué haces?",
+      opciones: ["No la marco y le aviso a mi jefe inmediato", "Marco SALIDA y después ENTRADA", "Marco SALIDA y ya", "No vuelvo a marcar"],
+      explica: "Esa SALIDA quedaría con la hora de hoy y dañaría tu jornada. Tu jefe inmediato hace cerrar el día anterior con la hora real." },
     { id: "t-ubicacion", tipo: "toque", rol: "todos", tema: "Paso 5 · Registrar",
       texto: "La ubicación no se activó sola. Toca para activarla.",
       captura: "ubicacion", zona: "activar", respuesta: "«Activar ubicación»",
@@ -152,7 +156,7 @@
       captura: "pestanas", zona: "mis_registros", respuesta: "«Mis registros»",
       explica: "En «Mis registros» ves tus marcas." },
     { id: "o-avisar", tipo: "opcion", rol: "todos", tema: "Antes de irte",
-      texto: "Si algo quedó mal en tu marca, ¿cuándo le avisas a tu líder?",
+      texto: "Si algo quedó mal en tu marca, ¿cuándo le avisas a tu líder o jefe inmediato?",
       opciones: ["El mismo día", "A fin de mes", "Cuando me pregunten", "No hace falta avisar"],
       explica: "Corregirlo a tiempo es mucho más fácil." },
     { id: "o-companero", tipo: "opcion", rol: "todos", tema: "Antes de irte",
@@ -782,6 +786,26 @@
   video.querySelector("source").addEventListener("error", () => {
     pintarVideo("No se pudo cargar el video. Revisa el internet y recarga la página.");
   });
+
+  // El video necesita internet: se avisa siempre y se marca en rojo si el celular está sin conexión.
+  function pintarConexion() {
+    const enLinea = navigator.onLine !== false;
+    $("videoConexion").classList.toggle("sin-red", !enLinea);
+    $("videoConexionTexto").textContent = enLinea
+      ? "Debes tener conexión a internet para ver el video. Si puedes, usa wifi."
+      : "No tienes conexión. Conéctate a internet (wifi o datos) para ver el video.";
+  }
+  window.addEventListener("online", pintarConexion);
+  window.addEventListener("offline", pintarConexion);
+  let esperaVideo = null;
+  video.addEventListener("waiting", () => {
+    clearTimeout(esperaVideo);
+    esperaVideo = setTimeout(() => {
+      if (!videoVisto) pintarVideo("El video está cargando lento. Revisa tu conexión a internet.");
+    }, 5000);
+  });
+  ["playing", "pause", "ended"].forEach((ev) => video.addEventListener(ev, () => clearTimeout(esperaVideo)));
+  pintarConexion();
 
   // ---------------------------------------------------------------- eventos
   document.querySelectorAll(".pr-rol").forEach((b) => b.addEventListener("click", () => elegirRol(b.dataset.rol)));
