@@ -911,8 +911,21 @@ function startServerClock() {
   }, SERVER_CLOCK_RESYNC_MS);
 }
 
+// Con la pagina abierta horas (o en segundo plano, donde el navegador frena los
+// temporizadores) el token de Supabase puede vencerse sin que se renueve solo.
+// getSession() lo renueva si hace falta antes de consultar.
+async function asegurarSesionVigente() {
+  try {
+    const { data, error } = await supabaseClient.auth.getSession();
+    return !error && !!data?.session;
+  } catch (_) {
+    return false;
+  }
+}
+
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.user) {
+    asegurarSesionVigente();
     syncServerClock({ silent: true });
   }
 });
@@ -4776,6 +4789,15 @@ async function resolverSentidoInicial() {
     return;
   }
 
+  // Cerca de la hora de entrada programada, la entrada abierta puede ser la que la
+  // persona acaba de hacer (marco y volvio a validar sin cerrar la pagina). Esa no
+  // es un turno viejo: lo que sigue es la SALIDA. Antes se trataba como turno sin
+  // cerrar y volvia a proponer ENTRADA, o abria el dialogo de cierre del turno.
+  if (sug.sentido === "entrada" && entradaAbiertaEsDelTurnoActual(state.openEntrada)) {
+    state.nextSentido = "salida";
+    return;
+  }
+
   // El horario dice que esta LLEGANDO pero arrastra un turno sin cerrar: se cierra
   // el viejo en vez de invertir el sentido. Si no lo declaran, el sentido SIGUE
   // siendo entrada y queda bloqueado (state.cierrePendiente): pasar a salida seria
@@ -4787,6 +4809,38 @@ async function resolverSentidoInicial() {
   }
 
   state.nextSentido = "salida";
+}
+
+// Misma tolerancia que estado_turno_actual() en la base para asociar una marca a
+// la hora programada del turno.
+const VENTANA_ENTRADA_TURNO_MS = 6 * 3600 * 1000;
+
+function msDeMarca(fecha, hora) {
+  const h = String(hora || "");
+  return new Date(`${fecha}T${h.length === 5 ? `${h}:00` : h.slice(0, 8)}`).getTime();
+}
+
+// ¿La entrada abierta es la del turno en curso (y no una de un turno anterior que
+// quedo sin cerrar)? Con programacion se compara contra la hora de entrada
+// programada; sin ella, una entrada de hace menos de LIMITE_HORAS_JORNADA es la
+// jornada en curso.
+function entradaAbiertaEsDelTurnoActual(open) {
+  if (!open?.fecha || !open?.hora) return false;
+  const p = getReportParts();
+  const ahora = msDeMarca(p.date, p.time);
+  const tsOpen = msDeMarca(open.fecha, open.hora);
+  if (Number.isNaN(ahora) || Number.isNaN(tsOpen)) return false;
+
+  // Se recalcula con la hora de AHORA y no se toma state.sentidoSegunProgramacion:
+  // ese se calculo al validar, y si la pantalla quedo abierta horas antes de tocar
+  // Registrar, la hora programada saldria corrida esas mismas horas.
+  const sug = sentidoSugeridoPorProgramacion();
+  if (sug && sug.sentido === "entrada" && sug.dist <= SENTIDO_PROG_MAX_MIN) {
+    const entradaProgramada = ahora - sug.minutos * 60000;
+    return Math.abs(tsOpen - entradaProgramada) <= VENTANA_ENTRADA_TURNO_MS;
+  }
+  const horas = (ahora - tsOpen) / 3600000;
+  return horas >= 0 && horas < LIMITE_HORAS_JORNADA;
 }
 
 /* ==========================================================================
@@ -4978,6 +5032,12 @@ async function buscarColaborador() {
     return;
   }
 
+  if (!(await asegurarSesionVigente())) {
+    setMessage(elements.formMessage,
+      "La sesión venció. Recarga la página e inicia sesión de nuevo para validar.", "error");
+    return;
+  }
+
   const csvCollaborator = await findActiveCsvCollaborator(dni);
   if (!csvCollaborator) {
     elements.collaboratorBox.className = "result-box";
@@ -5018,7 +5078,22 @@ async function buscarColaborador() {
   }
 
   state.colaborador = data || null;
-  await loadLastAttendance(dni);
+  try {
+    await loadLastAttendance(dni, { strict: true });
+  } catch (e) {
+    // Sin la ultima marca no se puede saber si toca ENTRADA o SALIDA: es mejor
+    // no dejar seguir que adivinar ENTRADA.
+    state.csvCandidate = null;
+    state.colaborador = null;
+    hideDriverGreetingCard();
+    stopCamera();
+    elements.collaboratorBox.className = "result-box";
+    elements.collaboratorBox.textContent = "No se pudo consultar la última marca de esta cédula.";
+    setMessage(elements.formMessage,
+      "No se pudo verificar si la próxima marca es ENTRADA o SALIDA. Revisa la conexión y vuelve a tocar Validar.", "error");
+    console.warn("loadLastAttendance fallo:", e?.message || e);
+    return;
+  }
   await loadLastEntradaForDni(dni);
   computeOpenEntrada();
   // El horario se consulta ANTES de decidir el sentido: la programacion sabe si la
@@ -5986,6 +6061,38 @@ async function submitAttendance(event) {
     console.warn("No se pudo revalidar el estado del turno:", e?.message || e);
   }
 
+  // La ultima marca se vuelve a leer de la base justo antes de registrar: la
+  // pantalla pudo quedar abierta horas, o la persona pudo marcar desde otro equipo.
+  // Con lo que diga la base (no lo que haya en memoria) se decide si es ENTRADA.
+  if (!(await asegurarSesionVigente())) {
+    setMessage(elements.formMessage,
+      "La sesión venció. Recarga la página e inicia sesión de nuevo para registrar.", "error");
+    return;
+  }
+  try {
+    await loadLastAttendance(dni, { strict: true });
+  } catch (e) {
+    setMessage(elements.formMessage,
+      "No se pudo verificar la última marca. Revisa la conexión y vuelve a tocar Registrar.", "error");
+    return;
+  }
+  computeOpenEntrada();
+  if (state.nextSentido === "entrada" && state.openEntrada
+      && entradaAbiertaEsDelTurnoActual(state.openEntrada)) {
+    const open = state.openEntrada;
+    setSentido("salida");
+    renderTurnoStatusBanner();
+    showAlertModal(
+      "Tu ENTRADA ya está registrada",
+      `Ya tienes una ENTRADA registrada el ${open.fecha} a las ${String(open.hora).slice(0, 5)}. `
+      + "Lo que corresponde ahora es la SALIDA y ya quedó seleccionada. "
+      + "Revisa y vuelve a tocar Registrar asistencia."
+    );
+    setMessage(elements.formMessage,
+      "Se cambió a SALIDA: la entrada de este turno ya estaba registrada.", "error");
+    return;
+  }
+
   // Turno anterior sin cerrar: se corta aqui, antes de pedir foto y ubicacion, para
   // no hacerle recorrer todo el proceso a quien igual no va a poder registrar.
   //
@@ -6723,7 +6830,10 @@ async function refreshCurrentHistory() {
   renderHistorySummary(state.currentHistory, dni);
 }
 
-async function loadLastAttendance(dni) {
+// strict: si la consulta falla se lanza el error. Sin esto un fallo (red, token
+// vencido tras horas con la pagina abierta) quedaba como "sin marcas" y la app
+// proponia ENTRADA a quien ya habia entrado.
+async function loadLastAttendance(dni, { strict = false } = {}) {
   const cleanDni = normalizeDni(dni);
   if (!cleanDni) {
     state.lastAttendance = null;
@@ -6741,6 +6851,7 @@ async function loadLastAttendance(dni) {
 
   if (error) {
     state.lastAttendance = null;
+    if (strict) throw error;
     return null;
   }
 
