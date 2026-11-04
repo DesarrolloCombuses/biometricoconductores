@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b6b3a">
+  <title>Práctica biométrico · Combuses</title>
+  <meta name="description" content="Practica y presenta el examen de cómo marcar ENTRADA y SALIDA en el biométrico de Combuses.">
+  <link rel="icon" type="image/png" sizes="192x192" href="./assets/icon-192.png">
+  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="./practica.css?v=20261104f">
+</head>
+<body>
+  <header class="pr-top">
+    <img class="pr-logo" src="./assets/logo-combuses.webp" alt="Combuses">
+    <div class="pr-top-txt">
+      <strong>Práctica del biométrico</strong>
+      <span id="topSub">Aprende a marcar ENTRADA y SALIDA</span>
+    </div>
+    <button id="salirButton" class="pr-icon hidden" type="button" aria-label="Salir">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </header>
+
+  <main class="pr-main">
+    <!-- Inicio -->
+    <section id="vInicio" class="pr-vista">
+      <div class="pr-hero">
+        <h1>¿Ya sabes marcar en el biométrico?</h1>
+        <p>Mira el video, practica con las pantallas de la app y luego presenta el examen. Los datos que vas a ver son de ejemplo.</p>
+      </div>
+
+      <h2 class="pr-paso"><span>1</span> ¿Cuál es tu cargo?</h2>
+      <div class="pr-roles" role="radiogroup" aria-label="Cargo">
+        <button class="pr-rol" type="button" role="radio" aria-checked="false" data-rol="conductor">
+          <strong>Conductor</strong><small>Con vehículo y base</small>
+        </button>
+        <button class="pr-rol" type="button" role="radio" aria-checked="false" data-rol="movilidad">
+          <strong>Gestor de movilidad</strong><small>Sin vehículo</small>
+        </button>
+        <button class="pr-rol" type="button" role="radio" aria-checked="false" data-rol="servicios">
+          <strong>Gestor de servicios y embarque</strong><small>Sin vehículo</small>
+        </button>
+      </div>
+
+      <h2 id="videoTitulo" class="pr-paso"><span>2</span> Mira el video completo</h2>
+      <div class="pr-video">
+        <video id="videoCapacitacion" controls playsinline preload="metadata"
+               controlslist="nodownload noplaybackrate" disablepictureinpicture
+               poster="./assets/practica/video-portada.webp" width="720" height="1280">
+          <source src="./assets/practica/capacitacion-biometrico.mp4?v=20261104a" type="video/mp4">
+          Tu navegador no puede mostrar el video.
+        </video>
+        <div class="pr-video-estado" id="videoEstado" role="status" aria-live="polite">
+          <div class="pr-barra" aria-hidden="true"><i id="videoBarra"></i></div>
+          <span id="videoTexto">Dura 3 min y medio. Míralo hasta el final para seguir.</span>
+        </div>
+      </div>
+
+      <h2 class="pr-paso"><span>3</span> ¿Qué quieres hacer?</h2>
+      <div class="pr-modos">
+        <button id="practicarButton" class="pr-modo" type="button" disabled>
+          <span class="pr-modo-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 19.5V6a2 2 0 0 1 2-2h12v14H6a2 2 0 0 0-2 2zm0 0A2 2 0 0 0 6 22h12"/></svg>
+          </span>
+          <span><strong>Practicar</strong><small id="practicarInfo">Todas las preguntas, en orden, con la explicación de cada una.</small></span>
+        </button>
+        <button id="examenButton" class="pr-modo pr-modo-examen" type="button" disabled>
+          <span class="pr-modo-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9"/></svg>
+          </span>
+          <span><strong>Presentar examen</strong><small>10 preguntas. Apruebas con 8 buenas. Cuenta tu primera respuesta.</small></span>
+        </button>
+      </div>
+      <p id="rolAviso" class="pr-aviso">Elige tu cargo y mira el video completo para habilitar la práctica y el examen.</p>
+      <a class="pr-link" href="./asistencia-web.html">Ir a la app para marcar →</a>
+    </section>
+
+    <!-- Datos para el examen -->
+    <section id="vDatos" class="pr-vista hidden">
+      <h1 class="pr-titulo">Antes de empezar</h1>
+      <p class="pr-texto">Si apruebas, tu cédula y tu nombre salen en tu certificado. Escríbelos bien.</p>
+      <form id="datosForm" class="pr-form" novalidate>
+        <label>Cédula
+          <input id="cedulaInput" type="text" inputmode="numeric" autocomplete="off" required maxlength="20" placeholder="Solo números">
+        </label>
+        <label>Nombre completo
+          <input id="nombreInput" type="text" autocomplete="name" required maxlength="80" placeholder="Nombres y apellidos">
+        </label>
+        <p id="datosMensaje" class="pr-error" role="alert"></p>
+        <button class="pr-btn" type="submit">Empezar examen</button>
+        <button id="datosVolver" class="pr-btn pr-btn-sec" type="button">Volver</button>
+      </form>
+    </section>
+
+    <!-- Pregunta -->
+    <section id="vPregunta" class="pr-vista hidden">
+      <div class="pr-progreso">
+        <span id="pNumero">Pregunta 1 de 10</span>
+        <span id="pModo" class="pr-chip">Práctica</span>
+      </div>
+      <div class="pr-barra" aria-hidden="true"><i id="pBarra"></i></div>
+      <p id="pTema" class="pr-tema"></p>
+      <h2 id="pTexto" class="pr-enunciado"></h2>
+      <p id="pPista" class="pr-pista hidden">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5a2 2 0 1 1 4 0v5m0-1a2 2 0 1 1 4 0v2m0-1a2 2 0 1 1 4 0v4a7 7 0 0 1-7 7h-1.5a6 6 0 0 1-4.6-2.2L4.6 14a1.8 1.8 0 0 1 2.8-2.3L9 13.5"/></svg>
+        Toca sobre la pantalla del celular
+      </p>
+      <div id="pOpciones" class="pr-opciones"></div>
+      <figure id="pToque" class="pr-toque hidden">
+        <div class="pr-celular">
+          <div id="pZonaToque" class="pr-zona-toque">
+            <img id="pImagen" alt="" width="780" height="1280">
+            <span id="pZona" class="pr-zona hidden"></span>
+            <span id="pMarca" class="pr-marca hidden"></span>
+          </div>
+        </div>
+      </figure>
+      <div id="pFeedback" class="pr-feedback hidden" role="status" aria-live="polite"></div>
+      <div class="pr-acciones">
+        <button id="pSiguiente" class="pr-btn" type="button" disabled>Siguiente</button>
+      </div>
+    </section>
+
+    <!-- Resultado -->
+    <section id="vResultado" class="pr-vista hidden">
+      <div id="rTarjeta" class="pr-resultado">
+        <div class="pr-puntaje"><strong id="rPuntaje">0/10</strong><span id="rEstado"></span></div>
+        <p id="rMensaje" class="pr-texto"></p>
+        <dl id="rDatos" class="pr-datos"></dl>
+      </div>
+      <div id="rCertificado" class="pr-certificado hidden">
+        <h3 class="pr-sub">Tu certificado</h3>
+        <p id="rCertCargando" class="pr-texto">Preparando tu certificado…</p>
+        <img id="rCertImg" class="hidden" alt="Certificado de aprobación del examen del biométrico" width="1240" height="1754">
+        <div class="pr-acciones pr-acciones-col">
+          <button id="rCompartir" class="pr-btn pr-btn-wa" type="button" disabled>Compartir certificado</button>
+          <button id="rDescargar" class="pr-btn pr-btn-sec" type="button" disabled>Descargar certificado</button>
+          <p id="rCertNota" class="pr-nota hidden" role="status"></p>
+        </div>
+      </div>
+      <div class="pr-acciones pr-acciones-col">
+        <button id="rRepetir" class="pr-btn" type="button">Repetir</button>
+        <button id="rExamen" class="pr-btn pr-btn-sec hidden" type="button">Ahora presenta el examen</button>
+        <button id="rVideo" class="pr-btn pr-btn-sec hidden" type="button">Ver el video otra vez</button>
+        <button id="rInicio" class="pr-btn pr-btn-sec" type="button">Volver al inicio</button>
+      </div>
+      <h3 id="rErroresTitulo" class="pr-sub hidden">Repasa lo que fallaste</h3>
+      <ol id="rErrores" class="pr-errores"></ol>
+    </section>
+  </main>
+
+  <script src="./practica-capturas.js?v=20261104f"></script>
+  <script src="./practica.js?v=20261104f"></script>
+</body>
+</html>
