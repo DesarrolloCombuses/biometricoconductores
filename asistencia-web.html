@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20261117d-hora-oficial">
+  <link rel="stylesheet" href="./asistencia.css?v=20261117e-intentos-suplantacion">
 </head>
 <body>
   <main class="shell">
@@ -442,6 +442,10 @@
           <button class="admin-subtab" type="button" data-admin-tab="mapa" role="tab">
             <i data-lucide="map-pin"></i>
             Mapa de marcas
+          </button>
+          <button class="admin-subtab" type="button" data-admin-tab="suplantacion" role="tab">
+            <i data-lucide="shield-alert"></i>
+            Intentos de suplantación
           </button>
           <button class="admin-subtab" type="button" data-admin-tab="colaboradores" role="tab">
             <i data-lucide="users"></i>
@@ -1351,6 +1355,58 @@
         </section>
         </div>
 
+        <!-- Intentos de marcar con la hora del celular cambiada o con una hora distinta a la
+             oficial (tabla intentos_suplantacion, 17-nov-2026). Ninguno de estos se guardo como marca. -->
+        <div class="admin-subtab-content hidden" data-admin-content="suplantacion">
+        <section class="panel database-panel">
+          <div class="database-toolbar">
+            <div>
+              <h2>Intentos de suplantación</h2>
+              <p id="suplStatus">Intentos de marcar con la hora del celular cambiada o con una hora distinta a la oficial. Ninguno se guardó como marca.</p>
+            </div>
+            <div class="database-actions">
+              <label class="search-field">
+                Desde
+                <input id="suplDesdeInput" type="date">
+              </label>
+              <label class="search-field">
+                Hasta
+                <input id="suplHastaInput" type="date">
+              </label>
+              <label class="search-field">
+                Buscar
+                <input id="suplBuscarInput" type="search" autocomplete="off"
+                       placeholder="Nombre, cédula o cuenta">
+              </label>
+              <button id="suplBuscarButton" class="primary" type="button">
+                <i data-lucide="refresh-cw"></i>
+                Consultar
+              </button>
+            </div>
+          </div>
+          <p id="suplMessage" class="message" role="status"></p>
+          <div id="suplResumen" class="supl-resumen hidden"></div>
+          <div class="table-wrap">
+            <table class="data-table supl-tabla">
+              <thead>
+                <tr>
+                  <th>Cuándo (hora oficial)</th>
+                  <th>Persona</th>
+                  <th>Qué pasó</th>
+                  <th>Hora del celular o de la marca</th>
+                  <th>Diferencia</th>
+                  <th>Cuenta y app</th>
+                  <th>Ubicación</th>
+                </tr>
+              </thead>
+              <tbody id="suplBody">
+                <tr><td colspan="7">Sin cargar</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        </div>
+
         <div class="admin-subtab-content hidden" data-admin-content="colaboradores">
         <section class="panel database-panel">
           <div class="database-toolbar">
@@ -1740,7 +1796,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20261117d-hora-oficial"></script>
+  <script src="./asistencia.js?v=20261117e-intentos-suplantacion"></script>
 </body>
 </html>
 

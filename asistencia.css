@@ -4240,3 +4240,47 @@ video,
   color: #b91c1c;
   font-weight: 700;
 }
+
+/* Administracion > Intentos de suplantacion (17-nov-2026). */
+.supl-resumen {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+.supl-resumen-titulo {
+  margin-left: 8px;
+  font-weight: 700;
+  color: #7f1d1d;
+}
+.supl-chip {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 0.85rem;
+}
+.supl-chip-rojo {
+  background: #fee2e2;
+  color: #7f1d1d;
+}
+.supl-tipo {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #fee2e2;
+  color: #991b1b;
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.supl-tabla td {
+  vertical-align: top;
+}
+
+/* En celular las pestañas de Administración con tablas anchas ensanchaban toda la página
+   (la grilla tomaba el ancho mínimo de la tabla). Con min-width: 0 la tabla se desplaza
+   dentro de su recuadro (.table-wrap) y la página queda del ancho de la pantalla. */
+.admin-subtab-content,
+.admin-subtab-content > .panel {
+  min-width: 0;
+}

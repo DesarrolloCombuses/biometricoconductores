@@ -339,6 +339,14 @@ const elements = {
   mapaCuentaSelect: $("#mapaCuentaSelect"),
   mapaUbicacionSelect: $("#mapaUbicacionSelect"),
   mapaFueraLista: $("#mapaFueraLista"),
+  suplDesdeInput: $("#suplDesdeInput"),
+  suplHastaInput: $("#suplHastaInput"),
+  suplBuscarInput: $("#suplBuscarInput"),
+  suplBuscarButton: $("#suplBuscarButton"),
+  suplStatus: $("#suplStatus"),
+  suplMessage: $("#suplMessage"),
+  suplResumen: $("#suplResumen"),
+  suplBody: $("#suplBody"),
   mapaStatus: $("#mapaStatus"),
   mapaMarcas: $("#mapaMarcas"),
   mapaMessage: $("#mapaMessage"),
@@ -3318,6 +3326,136 @@ function renderMapaFueraLista(marcas) {
   });
 }
 
+/* --------------------------------------------------------------------------
+   Intentos de suplantacion (17-nov-2026)
+   Lista la bitacora intentos_suplantacion: quien intento marcar con la hora del
+   celular cambiada, con una hora editada a mano o con una hora que la base no
+   acepto. Ninguno quedo como marca (ver verificarHoraOficial y el trigger
+   trg_01_bloquear_hora_falsa).
+   -------------------------------------------------------------------------- */
+const TIPOS_SUPLANTACION = {
+  hora_equipo_cambiada: "Hora del celular cambiada",
+  hora_marca_editada: "Hora de la marca puesta a mano",
+  hora_marca_no_coincide: "La base rechazó la marca: hora distinta a la oficial"
+};
+const APPS_SUPLANTACION = { biometrico: "Biométrico", portal: "Portal del conductor", servidor: "Base de datos" };
+
+// Suma dias a una fecha YYYY-MM-DD sin depender de la zona horaria del equipo.
+function sumarDiasIso(fecha, dias) {
+  const d = new Date(`${fecha}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + dias);
+  return d.toISOString().slice(0, 10);
+}
+
+function setupSuplantacionDefaults() {
+  if (!elements.suplDesdeInput || elements.suplDesdeInput.value) return;
+  const hoy = getTodayParts().date;
+  elements.suplDesdeInput.value = sumarDiasIso(hoy, -30);
+  elements.suplHastaInput.value = hoy;
+}
+
+// "2026-11-17T20:11:05" -> "17/11 20:11"
+function fechaHoraCorta(ts) {
+  if (!ts) return "";
+  const s = String(ts);
+  return `${s.slice(8, 10)}/${s.slice(5, 7)} ${s.slice(11, 16)}`;
+}
+
+function diferenciaSuplTexto(min) {
+  if (min === null || min === undefined) return "—";
+  const abs = Math.abs(min);
+  const t = abs < 120 ? `${abs} min` : `${Math.floor(abs / 60)} h${abs % 60 ? ` ${abs % 60} min` : ""}`;
+  return `${t} ${min >= 0 ? "adelantada" : "atrasada"}`;
+}
+
+function renderSuplantacion() {
+  const filas = state.suplantacionFilas || [];
+  const q = (elements.suplBuscarInput?.value || "").trim().toLowerCase();
+  const vis = q
+    ? filas.filter((f) => [f.nombre, f.dni, f.cuenta].some((v) => String(v || "").toLowerCase().includes(q)))
+    : filas;
+
+  const personas = new Map();
+  for (const f of vis) {
+    const k = f.dni || f.cuenta || "sin dato";
+    personas.set(k, { nombre: f.nombre || f.dni || f.cuenta || "Sin dato", n: (personas.get(k)?.n || 0) + 1 });
+  }
+  const porTipo = {};
+  for (const f of vis) porTipo[f.tipo] = (porTipo[f.tipo] || 0) + 1;
+
+  elements.suplStatus.textContent = vis.length
+    ? `${vis.length} intento(s) de ${personas.size} persona(s) entre ${elements.suplDesdeInput.value} y ${elements.suplHastaInput.value}. Ninguno se guardó como marca.`
+    : `Sin intentos entre ${elements.suplDesdeInput.value} y ${elements.suplHastaInput.value}.`;
+
+  if (vis.length) {
+    const tipos = Object.entries(porTipo)
+      .map(([t, n]) => `<span class="supl-chip">${escapeHtml(TIPOS_SUPLANTACION[t] || t)}: <strong>${n}</strong></span>`).join("");
+    const repetidos = [...personas.values()].filter((p) => p.n > 1).sort((a, b) => b.n - a.n).slice(0, 8)
+      .map((p) => `<span class="supl-chip supl-chip-rojo">${escapeHtml(p.nombre)}: <strong>${p.n}</strong></span>`).join("");
+    elements.suplResumen.innerHTML = tipos + (repetidos ? `<span class="supl-resumen-titulo">Lo repiten:</span>${repetidos}` : "");
+    elements.suplResumen.classList.remove("hidden");
+  } else {
+    elements.suplResumen.classList.add("hidden");
+    elements.suplResumen.innerHTML = "";
+  }
+
+  if (!vis.length) {
+    elements.suplBody.innerHTML = `<tr><td colspan="7">${q ? "Nada coincide con la búsqueda." : "Sin intentos en estas fechas."}</td></tr>`;
+    return;
+  }
+  elements.suplBody.innerHTML = vis.map((f) => {
+    const mismoDia = String(f.hora_equipo || "").slice(0, 10) === String(f.hora_oficial || "").slice(0, 10);
+    const horaEq = f.hora_equipo ? (mismoDia ? String(f.hora_equipo).slice(11, 16) : fechaHoraCorta(f.hora_equipo)) : "—";
+    const sentido = f.sentido === "entrada" ? "Entrada" : (f.sentido === "salida" ? "Salida" : "");
+    const mapa = f.latitud && f.longitud
+      ? `<a href="https://www.google.com/maps?q=${encodeURIComponent(f.latitud)},${encodeURIComponent(f.longitud)}" target="_blank" rel="noopener">Ver mapa</a>`
+      : "—";
+    return `<tr>
+      <td>${escapeHtml(fechaHoraCorta(f.hora_oficial))}</td>
+      <td><strong>${escapeHtml(f.nombre || "Sin nombre")}</strong><br><small>${escapeHtml(f.dni || "sin cédula")}</small></td>
+      <td><span class="supl-tipo">${escapeHtml(TIPOS_SUPLANTACION[f.tipo] || f.tipo)}</span>${sentido ? `<br><small>${sentido}</small>` : ""}</td>
+      <td>${escapeHtml(horaEq)}</td>
+      <td><strong>${escapeHtml(diferenciaSuplTexto(f.diferencia_min))}</strong></td>
+      <td>${escapeHtml(f.cuenta || "sin cuenta")}<br><small>${escapeHtml(APPS_SUPLANTACION[f.app] || f.app || "")}</small></td>
+      <td>${mapa}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function cargarSuplantacion() {
+  const desde = elements.suplDesdeInput?.value;
+  const hasta = elements.suplHastaInput?.value;
+  if (!desde || !hasta) {
+    setMessage(elements.suplMessage, "Selecciona el rango de fechas.", "error");
+    return;
+  }
+  if (desde > hasta) {
+    setMessage(elements.suplMessage, "La fecha inicial no puede ser mayor que la final.", "error");
+    return;
+  }
+  setBusy(elements.suplBuscarButton, true);
+  setMessage(elements.suplMessage, "");
+  elements.suplStatus.textContent = "Cargando intentos...";
+  try {
+    const { data, error } = await supabaseClient
+      .from("intentos_suplantacion")
+      .select("id,creado_en,tipo,app,dni,nombre,cuenta,sentido,hora_equipo,hora_oficial,diferencia_min,latitud,longitud")
+      .gte("creado_en", `${desde}T00:00:00-05:00`)
+      .lt("creado_en", `${sumarDiasIso(hasta, 1)}T00:00:00-05:00`)
+      .order("creado_en", { ascending: false })
+      .limit(2000);
+    if (error) throw error;
+    state.suplantacionFilas = data || [];
+    state.suplantacionLoaded = true;
+    renderSuplantacion();
+  } catch (e) {
+    elements.suplStatus.textContent = "No se pudieron cargar los intentos.";
+    setMessage(elements.suplMessage, e?.message || "Error cargando los intentos.", "error");
+  } finally {
+    setBusy(elements.suplBuscarButton, false);
+  }
+}
+
 async function cargarMapaMarcas() {
   const desde = elements.mapaDesdeInput?.value;
   const hasta = elements.mapaHastaInput?.value;
@@ -3519,7 +3657,7 @@ function exportarBase3Csv() {
 }
 
 function showAdminSubtab(name) {
-  const valid = ["alerts", "abiertos", "marcas", "jornadas", "rechazos", "inconsistencias", "validacion", "sinmarca", "corregir", "puntualidad", "jornadas-anomalas", "verificador", "horario", "mapa", "colaboradores", "perfilsociodemografico", "rostros", "sonar"];
+  const valid = ["alerts", "abiertos", "marcas", "jornadas", "rechazos", "inconsistencias", "validacion", "sinmarca", "corregir", "puntualidad", "jornadas-anomalas", "verificador", "horario", "mapa", "suplantacion", "colaboradores", "perfilsociodemografico", "rostros", "sonar"];
   const target = valid.includes(name) ? name : "alerts";
   document.querySelectorAll("[data-admin-tab]").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.adminTab === target);
@@ -3578,6 +3716,11 @@ function showAdminSubtab(name) {
       state.mapaMap?.invalidateSize();
       if (!state.mapaLoaded) cargarMapaMarcas();
     }, 60);
+  }
+
+  if (target === "suplantacion") {
+    setupSuplantacionDefaults();
+    if (!state.suplantacionLoaded) cargarSuplantacion();
   }
 
   if (target === "colaboradores" && !state.csvLoaded) {
@@ -10869,6 +11012,10 @@ elements.horarioExportButton?.addEventListener("click", exportarHorarioCsv);
 elements.base3BuscarButton?.addEventListener("click", cargarBase3);
 elements.base3ExportButton?.addEventListener("click", exportarBase3Csv);
 elements.mapaBuscarButton?.addEventListener("click", cargarMapaMarcas);
+elements.suplBuscarButton?.addEventListener("click", cargarSuplantacion);
+elements.suplBuscarInput?.addEventListener("input", renderSuplantacion);
+elements.suplDesdeInput?.addEventListener("change", cargarSuplantacion);
+elements.suplHastaInput?.addEventListener("change", cargarSuplantacion);
 // Al cambiar la cuenta o el filtro de ubicación el mapa se recarga solo.
 elements.mapaCuentaSelect?.addEventListener("change", cargarMapaMarcas);
 elements.mapaUbicacionSelect?.addEventListener("change", cargarMapaMarcas);
