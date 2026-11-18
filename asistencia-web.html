@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
-  <link rel="stylesheet" href="./asistencia.css?v=20261028b-revalidar-entrada-salida">
+  <link rel="stylesheet" href="./asistencia.css?v=20261117d-hora-oficial">
 </head>
 <body>
   <main class="shell">
@@ -1318,6 +1318,20 @@
                 <input id="mapaBuscarInput" type="text" autocomplete="off"
                        placeholder="Nombre, cédula o vehículo">
               </label>
+              <label class="search-field">
+                Usuario que registra
+                <select id="mapaCuentaSelect">
+                  <option value="">Todas las cuentas</option>
+                </select>
+              </label>
+              <label class="search-field">
+                Ubicación
+                <select id="mapaUbicacionSelect">
+                  <option value="">Todas las marcas</option>
+                  <option value="fuera">Solo FUERA de despachos autorizados</option>
+                  <option value="dentro">Solo dentro de despachos</option>
+                </select>
+              </label>
               <button id="mapaBuscarButton" class="primary" type="button">
                 <i data-lucide="search"></i>
                 Ver en el mapa
@@ -1327,10 +1341,13 @@
           <div class="mapa-leyenda">
             <span><i class="mapa-dot mapa-dot-entrada"></i> Entrada</span>
             <span><i class="mapa-dot mapa-dot-salida"></i> Salida</span>
+            <span><i class="mapa-dot mapa-dot-fuera"></i> Fuera de despacho autorizado</span>
+            <span><i class="mapa-geocerca"></i> Despacho autorizado</span>
             <span class="field-hint">El círculo indica la precisión GPS reportada.</span>
           </div>
           <div id="mapaMarcas" class="mapa-marcas"></div>
           <p id="mapaMessage" class="message" role="status"></p>
+          <div id="mapaFueraLista" class="mapa-fuera-lista hidden"></div>
         </section>
         </div>
 
@@ -1723,7 +1740,7 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="./supabase-config.js"></script>
-  <script src="./asistencia.js?v=20261028b-revalidar-entrada-salida"></script>
+  <script src="./asistencia.js?v=20261117d-hora-oficial"></script>
 </body>
 </html>
 

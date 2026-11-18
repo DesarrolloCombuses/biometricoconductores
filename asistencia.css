@@ -265,7 +265,9 @@ button:disabled {
   transform: none !important;
 }
 
-svg {
+/* Tamaño de los íconos. Se excluyen los SVG de los mapas Leaflet: ahí se dibujan los
+   puntos de las marcas y Leaflet les fija el tamaño; con 18px quedaban invisibles. */
+svg:not(.leaflet-container svg) {
   width: 18px;
   height: 18px;
   flex: 0 0 auto;
@@ -1506,6 +1508,44 @@ svg {
 
 .mapa-dot-entrada { background: #0a6b3b; }
 .mapa-dot-salida { background: #c2410c; }
+.mapa-dot-fuera { background: #9ca3af; border: 3px solid #dc2626; width: 14px; height: 14px; }
+
+.mapa-geocerca {
+  display: inline-block;
+  width: 16px;
+  height: 12px;
+  border: 2px solid #1d4ed8;
+  background: rgba(59, 130, 246, 0.2);
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+/* Listas desplegables del mapa: la de cuentas es ancha (correo + conteos). */
+.database-actions .search-field select {
+  width: 100%;
+}
+#mapaCuentaSelect {
+  min-width: 260px;
+}
+.search-field:has(#mapaCuentaSelect) {
+  flex: 2 1 340px;
+  max-width: 460px;
+}
+
+.mapa-fuera-lista h3 {
+  margin: 14px 0 2px;
+  font-size: 1rem;
+  color: #b91c1c;
+}
+.mapa-fuera-lista .table-wrap {
+  max-height: 360px;
+}
+.mapa-fuera-lista tbody tr {
+  cursor: pointer;
+}
+.mapa-fuera-lista tbody tr:hover {
+  background: #fef2f2;
+}
 
 /* ---- Horario programado ---- */
 .turno-pill {
@@ -3403,7 +3443,7 @@ video,
   width: 54px;
 }
 
-.touch-device svg {
+.touch-device svg:not(.leaflet-container svg) {
   width: 21px;
   height: 21px;
 }
@@ -4193,4 +4233,10 @@ video,
   object-fit: cover;
   border-radius: 10px;
   border: 1px solid var(--line);
+}
+
+/* Aviso fijo cuando la hora del equipo esta corrida frente a la del servidor (17-nov-2026). */
+.reloj-corrido {
+  color: #b91c1c;
+  font-weight: 700;
 }
